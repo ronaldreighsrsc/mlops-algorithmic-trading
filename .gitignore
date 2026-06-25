@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Entornos virtuales
+venv/
+env/
+ENV/
+
+# Variables de entorno y secretos (CRÍTICO)
+.env
+.env.local
+.env.prod
+
+# IDEs
+.vscode/
+.idea/
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+
+# Datos (no subir CSVs o bases de datos pesadas)
+data/raw/
+data/processed/
+*.sqlite3
+
+# Modelos entrenados (pesados, se regeneran con main_training.py)
+results/saved_models/*.keras
+results/saved_models/*.pkl
+results/*.npy
+
+# Caché de producción
+cache/
+
+# Logs
+*.log
