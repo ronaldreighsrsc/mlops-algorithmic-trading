@@ -20,10 +20,11 @@ class DataExtractor:
         self.connector = connector
 
     def _fetch_macro_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
-        logging.info("Descargando datos Macro (VIX y DXY) usando yfinance...")
+        logging.info("Descargando datos Macro (VIX, DXY, Yield10Y) usando yfinance...")
         try:
             vix = yf.download("^VIX", start=start_date, end=end_date, progress=False)
             dxy = yf.download("DX-Y.NYB", start=start_date, end=end_date, progress=False)
+            tnx = yf.download("^TNX", start=start_date, end=end_date, progress=False)
             
             macro_df = pd.DataFrame()
             if not vix.empty:
@@ -38,6 +39,12 @@ class DataExtractor:
                     macro_df['DXY_close'] = dxy['Close'].iloc[:, 0] if len(dxy['Close'].shape) > 1 else dxy['Close']
                 else:
                     macro_df['DXY_close'] = dxy['Close']
+                    
+            if not tnx.empty:
+                if isinstance(tnx.columns, pd.MultiIndex):
+                    macro_df['Yield10Y'] = tnx['Close'].iloc[:, 0] if len(tnx['Close'].shape) > 1 else tnx['Close']
+                else:
+                    macro_df['Yield10Y'] = tnx['Close']
                     
             if not macro_df.empty:
                 macro_df.index = macro_df.index.tz_localize(None).normalize()
@@ -101,6 +108,8 @@ class DataExtractor:
             df['VIX_close'] = df['VIX_close'].bfill()
         if 'DXY_close' in df.columns:
             df['DXY_close'] = df['DXY_close'].bfill()
+        if 'Yield10Y' in df.columns:
+            df['Yield10Y'] = df['Yield10Y'].ffill().bfill()
             
         logging.info(f"Éxito: Se extrajeron {len(df)} registros totales para {symbol}.")
         return df
@@ -122,12 +131,13 @@ class DataExtractor:
             df.index = df.index.tz_localize(None).normalize()
             df.index.name = 'time'
             
-            # Merge with macro data (VIX & DXY)
+            # Merge with macro data (VIX & DXY & Yield10Y)
             macro_df = self._fetch_macro_data(start_date, end_date)
             if not macro_df.empty:
                 df = df.join(macro_df, how='left')
                 if 'VIX_close' in df.columns: df['VIX_close'] = df['VIX_close'].ffill().bfill()
                 if 'DXY_close' in df.columns: df['DXY_close'] = df['DXY_close'].ffill().bfill()
+                if 'Yield10Y' in df.columns: df['Yield10Y'] = df['Yield10Y'].ffill().bfill()
                 
             # MERGE WITH CHILEAN MACRO DATA FOR ECH
             if symbol == "ECH":

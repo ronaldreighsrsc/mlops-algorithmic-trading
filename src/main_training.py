@@ -26,21 +26,21 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # CONFIGURACIÓN DEL EXPERIMENTO
 # ==============================================================================
 # ⚠️ MODO RECUPERACIÓN (Crash RAM): Corriendo de a 1 activo.
-ACTIVOS_A_CORRER = ["EURUSD"] # ["ECH", "EURUSD", "SP500", "Oro"]
+ACTIVOS_A_CORRER = ["Oro"] # ["ECH", "EURUSD", "SP500", "Oro"]
 MODELOS_A_CORRER = [
     #'ARIMAX', 
-    #'RANDOM_FOREST',
-    #'XGBOOST', 
-    #'LSTM',
-    #'BILSTM',
-    #'ARIMA_LSTM',
+    'RANDOM_FOREST',
+    'XGBOOST', 
+    'LSTM',
+    'BILSTM',
+    'ARIMA_LSTM',
     'LSTM_RF' # Solo falta este para terminar EURUSD
 ]
 
 # Grillas de Hiperparámetros (Distribuciones para Randomized Search)
 RF_GRID = {'n_estimators': [100, 250, 500, 1000], 'max_depth': [5, 10, 20, 30, None], 'min_samples_split': [2, 5, 10], 'max_features': ['sqrt', 'log2']}
 XGB_GRID = {'n_estimators': [200, 500, 1000], 'max_depth': [3, 5, 7, 9], 'learning_rate': [0.005, 0.01, 0.05, 0.1], 'subsample': [0.6, 0.8, 1.0]}
-NN_GRID = {'units': [32, 64, 128, 256], 'dropout': [0.1, 0.2, 0.3, 0.4]}
+NN_GRID = {'units': [32, 64, 128, 256], 'dropout': [0.1, 0.2, 0.3]}
 HIBRIDO_RF_GRID = {'units': [32, 64, 128], 'dropout': [0.1, 0.2, 0.3]}
 
 # Bancos de Variables Dinámicos por Activo
