@@ -25,16 +25,16 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # ==============================================================================
 # CONFIGURACIÓN DEL EXPERIMENTO
 # ==============================================================================
-ACTIVOS_A_CORRER = ["ECH","EURUSD", "SP500", "Oro"] #  
-
+# ⚠️ MODO RECUPERACIÓN (Crash RAM): Corriendo de a 1 activo.
+ACTIVOS_A_CORRER = ["EURUSD"] # ["ECH", "EURUSD", "SP500", "Oro"]
 MODELOS_A_CORRER = [
     #'ARIMAX', 
-    'RANDOM_FOREST',
-    'XGBOOST', 
-    'LSTM',
-    'BILSTM',
-    'ARIMA_LSTM',
-    'LSTM_RF'
+    #'RANDOM_FOREST',
+    #'XGBOOST', 
+    #'LSTM',
+    #'BILSTM',
+    #'ARIMA_LSTM',
+    'LSTM_RF' # Solo falta este para terminar EURUSD
 ]
 
 # Grillas de Hiperparámetros (Distribuciones para Randomized Search)
@@ -237,6 +237,11 @@ def train_for_asset(activo: str):
                 "Banco": nombre_banco,
                 "Mejores_Params": str(best_params)
             })
+            
+            # 🧹 Limpiar Memoria RAM y Backend Keras (Garbage Collection Crítico)
+            import gc
+            tf.keras.backend.clear_session()
+            gc.collect()
 
     # 4. Resumen Global
     if resultados_globales:
