@@ -514,8 +514,29 @@ class MultiAssetBotManager:
                 bot.connector = self.connector
                 bot.engine.connector = self.connector
                 bot.load_model()
+            logging.info("✅ Todos los modelos cargados.")
             
-            logging.info("✅ Todos los modelos cargados. Esperando cierre de velas... (Presiona Ctrl+C para detener)")
+            # 1.5 Cargar Pesos HRP Dinámicos
+            import json
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            hrp_path = os.path.join(base_dir, "results", "hrp_weights.json")
+            if os.path.exists(hrp_path):
+                with open(hrp_path, 'r') as f:
+                    hrp_weights = json.load(f)
+                logging.info(f"⚖️ Pesos de Portafolio HRP detectados: {hrp_weights}")
+                for bot in self.bots:
+                    if bot.symbol in hrp_weights:
+                        peso_hrp = hrp_weights[bot.symbol]
+                        riesgo_original = bot.risk_manager.risk_per_trade_pct
+                        # El peso HRP indica qué % del capital total va a este activo.
+                        # Asumiendo que el riesgo original era para el 100% del capital.
+                        nuevo_riesgo = riesgo_original * peso_hrp * len(self.bots) # Escalar proporcionalmente
+                        bot.risk_manager.risk_per_trade_pct = nuevo_riesgo
+                        logging.info(f"  > [{bot.symbol}] Riesgo Base ajustado por HRP: {riesgo_original:.2%} -> {nuevo_riesgo:.2%}")
+            else:
+                logging.warning("⚠️ No se encontró 'hrp_weights.json'. Operando con pesos distribuidos uniformemente (1/N).")
+
+            logging.info("Esperando cierre de velas... (Presiona Ctrl+C para detener)")
             if self.bots:
                 self.bots[0].notifier.alert_startup() # Enviar una sola notificación global de encendido
             

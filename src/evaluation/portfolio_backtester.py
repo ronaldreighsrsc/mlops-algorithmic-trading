@@ -125,5 +125,116 @@ if __name__ == "__main__":
     
     activos = ["EURUSD", "SP500", "Oro", "ECH"]
     
+    # 1. Simulación Individual (Silos)
     for activo_actual in activos:
         simulate_portfolio(activo=activo_actual, capital_inicial=CAPITAL, riesgo_por_trade=RIESGO_PCT)
+        
+    # 2. Simulación Global con HRP (Machine Learning Multi-Activo)
+    def simulate_global_portfolio(activos, capital_inicial=10000.0):
+        print(f"\n💰 INICIANDO GLOBAL PORTFOLIO HRP BACKTESTER 💰")
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        data_dir = os.path.join(base_dir, "data")
+        results_dir = os.path.join(base_dir, "results")
+        modelos = ['ARIMAX', 'RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
+        bancos = ['Precio_Puro', 'Precio_Volumen', 'Tecnicos', 'Macros', 'Globales', 'Hibrido_Precio_Tec_Vol', 'Macro_Vol', 'Kitchen_Sink_Total', 'Total']
+        
+        series_retornos = {}
+        
+        for activo in activos:
+            tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir)
+            campeones_tuple = tester.run_tournament(modelos, bancos)
+            campeones = campeones_tuple[0]
+            if not campeones:
+                continue
+            mejor_modelo = max(campeones.keys(), key=lambda k: campeones[k]['alpha'])
+            data = campeones[mejor_modelo]
+            
+            exit_times = data['exit_times']
+            cum_ret = data['cum_ret_series']
+            
+            df_asset = pd.DataFrame({'cum_ret': cum_ret}, index=exit_times)
+            df_asset = df_asset[~df_asset.index.duplicated(keep='last')]
+            series_retornos[activo] = df_asset['cum_ret']
+            
+        if not series_retornos:
+            print("No hay datos de campeones para simular el portafolio global.")
+            return
+            
+        df_global = pd.DataFrame(series_retornos)
+        df_global.ffill(inplace=True)
+        df_global.fillna(1.0, inplace=True)
+        
+        # Calcular retornos diarios brutos de cada estrategia
+        df_returns = df_global.pct_change().fillna(0.0)
+        
+        # Instanciar el optimizador
+        from evaluation.hrp_optimizer import HRPOptimizer
+        hrp = HRPOptimizer()
+        
+        capital_hrp = capital_inicial
+        capital_eq = capital_inicial
+        
+        historial_hrp = [capital_inicial]
+        historial_eq = [capital_inicial]
+        fechas_sim = [df_returns.index[0]]
+        
+        if len(df_returns) < 100:
+            print("No hay suficientes datos historicos para correr HRP.")
+            return
+            
+        pesos_hrp = pd.Series(1.0 / len(activos), index=activos)
+        
+        # Caminar a través del tiempo
+        for i in range(100, len(df_returns)):
+            # Rebalanceo mensual (aprox 20 dias habiles)
+            if i % 20 == 0:
+                ventana_historica = df_returns.iloc[i-100:i]
+                cols_validas = ventana_historica.columns[ventana_historica.std() > 0]
+                if len(cols_validas) > 1:
+                    try:
+                        pesos_hrp_validos = hrp.allocate(ventana_historica[cols_validas])
+                        pesos_hrp = pd.Series(0.0, index=activos)
+                        for col in cols_validas:
+                            pesos_hrp[col] = pesos_hrp_validos[col]
+                    except Exception as e:
+                        pass # Usar pesos anteriores si falla la matriz
+                        
+            retornos_dia = df_returns.iloc[i]
+            
+            # PnL HRP
+            pnl_pct_hrp = (pesos_hrp * retornos_dia).sum()
+            capital_hrp *= (1 + pnl_pct_hrp)
+            
+            # PnL Equivalente (1/N)
+            pnl_pct_eq = (retornos_dia.sum() / len(activos))
+            capital_eq *= (1 + pnl_pct_eq)
+            
+            historial_hrp.append(capital_hrp)
+            historial_eq.append(capital_eq)
+            fechas_sim.append(df_returns.index[i])
+            
+        print(f"\n📊 RESULTADOS FINALES GLOBAL PORTFOLIO (Rebalanceo Mensual)")
+        print(f"============================================================")
+        print(f"Capital Inicial: ${capital_inicial:,.2f}")
+        print(f"Capital Final HRP:   ${capital_hrp:,.2f} (ROI: {(capital_hrp/capital_inicial - 1):.2%})")
+        print(f"Capital Final 1/N:   ${capital_eq:,.2f} (ROI: {(capital_eq/capital_inicial - 1):.2%})")
+        
+        plt.figure(figsize=(12, 6))
+        plt.plot(fechas_sim, historial_hrp, label='Portafolio HRP (López de Prado)', color='blue', linewidth=2.5)
+        plt.plot(fechas_sim, historial_eq, label='Portafolio 1/N (Tradicional)', color='gray', linestyle='--', linewidth=2)
+        plt.title("HRP vs Equally Weighted Portfolio Backtest", fontsize=15, fontweight='bold')
+        plt.ylabel("Capital en Dólares ($USD)")
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.legend()
+        plt.tight_layout()
+        plt.savefig("global_portfolio_hrp.png")
+        print("✅ Gráfico guardado como 'global_portfolio_hrp.png'")
+        
+        # Guardar pesos finales para el Bot en Vivo
+        import json
+        pesos_dict = pesos_hrp.to_dict()
+        with open(os.path.join(results_dir, "hrp_weights.json"), "w") as f:
+            json.dump(pesos_dict, f, indent=4)
+        print("✅ Pesos HRP exportados a 'hrp_weights.json' para Producción.")
+
+    simulate_global_portfolio(activos, capital_inicial=CAPITAL)

@@ -2,7 +2,7 @@
 
 Este repositorio contiene un sistema de trading algorítmico cuantitativo de grado institucional, diseñado para operar de manera automatizada a través de MetaTrader 5 (MT5), específicamente enfocado en el broker Darwinex.
 
-El sistema emplea el marco teórico avanzado de **Marcos López de Prado** (Advances in Financial Machine Learning), utilizando redes neuronales profundas (BiLSTM), control de riesgo estocástico, detectores de anomalías MLOps y transformaciones matemáticas rigurosas para operar en temporalidades diarias (D1).
+El sistema emplea el marco teórico avanzado de **Marcos López de Prado** (Advances in Financial Machine Learning), utilizando un ensamble de modelos tradicionales (Random Forest, XGBoost), redes neuronales profundas (LSTM, BiLSTM), arquitecturas híbridas avanzadas (ARIMA-LSTM, LSTM-RF), control de riesgo estocástico, detectores de anomalías MLOps y transformaciones matemáticas rigurosas para operar en temporalidades diarias (D1).
 
 ## 🧠 Arquitectura Core
 
@@ -31,6 +31,9 @@ La estadística del mercado envejece. El sistema calcula constantemente la Media
 
 ### 4. Shadow Journal (Diario Sin Estado en Producción)
 Para alimentar los detectores de MLOps en el día a día sin depender de bases de datos o archivos `.csv` corruptibles, el bot en vivo utiliza una arquitectura **Stateless**. Cada mañana descarga los últimos 300 días de historial, predice las probabilidades "al vuelo" y simula internamente las operaciones recientes usando el `TripleBarrierBacktester`. El resultado de esta simulación "sombra" le permite saber instantáneamente si está en racha perdedora y auto-bloquearse (activar Cuarentena) antes de lanzar la orden del día.
+
+### 5. Hierarchical Risk Parity (HRP)
+Implementación nativa del algoritmo de asignación de capital de Marcos López de Prado. En lugar de utilizar la inestable optimización de Markowitz, el sistema agrupa los activos según su correlación histórica mediante *Clustering Jerárquico*. El simulador global calcula los pesos ideales, y el bot en Producción lee esta matriz resultante (`hrp_weights.json`), reduciendo dinámicamente el presupuesto (lotes) de aquellos bots que estén altamente correlacionados entre sí para maximizar la diversificación real.
 
 ---
 
@@ -94,6 +97,10 @@ python src/execution/main_bot.py
 
 ## ⚙️ Configuración del Entorno
 
-1. Python 3.12 (64-bits) requerido.
-2. Crea `.env` en la raíz con credenciales de MT5 (Darwinex-Demo) y Tokens de Telegram (Opcional).
-3. Entorno virtual: `python -m venv venv` -> `pip install -r requirements.txt`.
+1. **Python 3.12 (64-bits)** requerido.
+2. Crea el archivo `.env` en la raíz con credenciales de MT5 (Darwinex-Demo) y Tokens de Telegram (Opcional).
+3. **Entorno Virtual**: Es obligatorio instalar las dependencias aisladas para evitar conflictos de versiones con Scipy y TensorFlow.
+   - **Crear entorno:** `python -m venv venv`
+   - **Activar entorno (Windows):** `venv\Scripts\activate`
+   - **Activar entorno (Mac/Linux):** `source venv/bin/activate`
+   - **Instalar dependencias:** `pip install -r requirements.txt`
