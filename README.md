@@ -51,22 +51,29 @@ quant-trading-bot/
  |   |   |-- bilstm_model.py       # BiLSTM Core
  |   |   |-- xgb_model.py          # XGBoost Core
  |   |   |-- arima_lstm.py         # Híbrido ARIMA + LSTM
+ |   |   |-- lstm_rf.py            # Híbrido LSTM + Random Forest
  |   |-- evaluation/
- |   |   |-- backtester.py         # TripleBarrierBacktester (Genera Campeones y Filtros)
- |   |   |-- portfolio_backtester.py # Simulador Financiero en USD
+ |   |   |-- backtester.py         # TripleBarrierBacktester (fast_mode: genera reportes y JSON)
+ |   |   |-- portfolio_backtester.py # Simulador Financiero en USD (entrena MLOps + Kelly + HRP)
+ |   |   |-- hrp_optimizer.py      # Hierarchical Risk Parity (López de Prado)
  |   |-- execution/
  |   |   |-- main_bot.py           # Live Trading Bot MT5 (Carga Filtros MLOps y Predice)
+ |   |   |-- risk_manager.py       # Monitor Híbrido de Riesgo (HMM + Autoencoder)
  |   |-- main_training.py          # Pipeline maestro de Retuning de Obreros (Walk-Forward)
- |-- results/
- |   |-- saved_models/             # Archivos Core (Sin Uso MLOps Directo)
- |   |-- *.npy, *.pkl, *.keras     # Probabilidades, Filtros Autoencoder y Json de Campeones
+ |   |-- main_preprocessing.py     # Pipeline maestro de Preprocesamiento (FFD, EGARCH, Triple Barrera)
+ |   |-- data_extractor.py         # Conexión a MT5 y Yahoo Finance
+ |-- results/                      # ⚠️ Ignorado por .gitignore (Protección de Alpha)
+ |   |-- saved_models/             # Modelos ML/DL entrenados (.pkl)
+ |   |-- mlops_monitors/           # HMM y Autoencoder pre-entrenados por portfolio_backtester
+ |   |-- *.npy                     # Probabilidades In-Sample y Out-of-Sample
+ |   |-- campeon_*.json            # Configuración del mejor modelo para Producción
  |-- requirements.txt              
  |-- .env                          
 ```
 
 ## 🔄 Pipeline End-to-End (Cómo Usar el Proyecto)
 
-El sistema está diseñado para fluir de manera secuencial. 
+El sistema está diseñado para fluir de manera secuencial. Cada paso depende del anterior.
 
 ### 1. Extracción y Preprocesamiento de Datos Crudos
 ```bash
@@ -79,15 +86,27 @@ python src/main_preprocessing.py
 ```bash
 python src/main_training.py
 ```
-*El script más pesado. Ejecútalo 1 o 2 veces al año. Pone a competir a decenas de arquitecturas (XGBoost, LSTM, ARIMA_LSTM) con diferentes bancos de datos. Realiza Grid Search, Purged K-Fold y genera simulaciones de Walk-Forward. Emite archivos `.npy` con predicciones puras en `results/`.*
+*El script más pesado. Ejecútalo 1 o 2 veces al año. Pone a competir a decenas de arquitecturas (XGBoost, LSTM, BiLSTM, ARIMA-LSTM, LSTM-RF) con diferentes bancos de datos. Realiza Grid Search, Purged K-Fold y genera simulaciones de Walk-Forward. Emite archivos `.npy` con predicciones puras y `.pkl` con modelos entrenados en `results/`.*
 
-### 3. Backtesting Matemático y Generación de Filtros
+### 3. Simulación Financiera Completa (El Script Pesado)
 ```bash
 python src/evaluation/portfolio_backtester.py
 ```
-*Este es el corazón analítico. Lee las predicciones de los obreros y **entrena a los Gerentes de Riesgo (HMM y LSTM Autoencoder)** sobre los datos "In-Sample". 
-Aplica las reglas de **Cuarentena (60 días)** y **Muerte por MDD (15%)** al Out-of-Sample. 
-Si un modelo sobrevive y da el mayor Alpha, se corona como `campeon_{activo}.json` y guarda sus filtros entrenados a disco (`.keras`, `.pkl`) listos para Producción.*
+*Este es el corazón analítico del sistema. Ejecuta el Torneo Financiero completo:*
+- *Lee las predicciones `.npy` de los obreros y **entrena a los Gerentes de Riesgo (HMM y LSTM Autoencoder)** sobre los datos In-Sample.*
+- *Guarda todos los modelos MLOps entrenados en `results/mlops_monitors/` para reutilización rápida.*
+- *Aplica las reglas de **Cuarentena (60 días)** y **Muerte por MDD (15%)** al Out-of-Sample.*
+- *Simula el capital real en USD con **Kelly Dinámico** y genera gráficos de rendimiento.*
+- *Ejecuta la optimización **HRP (Hierarchical Risk Parity)** multi-activo y exporta los pesos a `hrp_weights.json`.*
+- *Corona al mejor modelo como `campeon_{activo}.json` con sus filtros MLOps listos para Producción.*
+
+> ⏱️ **Duración estimada:** ~1-2 horas (entrena HMM + Autoencoder para cada combinación modelo/banco).
+
+### 3b. Regenerar Reportes Rápidamente (Modo Fast)
+```bash
+python src/evaluation/backtester.py
+```
+*Ejecuta el mismo Torneo pero en **modo rápido (`fast_mode=True`)**. En lugar de re-entrenar los HMM y Autoencoders desde cero, los **carga desde disco** (`results/mlops_monitors/`). Genera el reporte HTML profesional, gráficos de Equity y el JSON de producción en segundos. Requiere haber corrido `portfolio_backtester.py` al menos una vez.*
 
 ### 4. Puesta en Producción (Live Trading)
 ```bash

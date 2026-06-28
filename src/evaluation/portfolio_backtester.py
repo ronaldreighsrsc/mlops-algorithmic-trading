@@ -16,8 +16,8 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     data_dir = os.path.join(base_dir, "data")
     results_dir = os.path.join(base_dir, "results")
-    tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir)
-    modelos = ['ARIMAX', 'RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
+    tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=False)
+    modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
     bancos = ['Precio_Puro', 'Precio_Volumen', 'Tecnicos', 'Macros', 'Globales', 'Hibrido_Precio_Tec_Vol', 'Macro_Vol', 'Kitchen_Sink_Total', 'Total']
     
     campeones_tuple = tester.run_tournament(modelos, bancos)
@@ -99,8 +99,15 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     print(f"Capital Final:   ${capital_actual:,.2f}")
     
     roi_total = (capital_actual / capital_inicial) - 1
-    print(f"ROI Compuesto:   {roi_total:.2%}")
+    print(f"ROI Total:       {roi_total:.2%}")
     
+    dias_totales = (fechas[-1] - fechas[0]).days
+    if dias_totales > 0:
+        anios = dias_totales / 365.25
+        roi_anualizado = (capital_actual / capital_inicial) ** (1 / anios) - 1
+        print(f"ROI Anualizado:  {roi_anualizado:.2%} (en {anios:.1f} años)")
+    else:
+        print(f"ROI Anualizado:  N/A (periodo muy corto)")
     # 5. Graficar Billetera Real
     plt.figure(figsize=(12, 6))
     plt.plot(fechas, historial_capital, label=f'Equidad con Kelly Dinámico (Base {riesgo_por_trade*100}%)', color='green', linewidth=2.5)
@@ -135,13 +142,13 @@ if __name__ == "__main__":
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         data_dir = os.path.join(base_dir, "data")
         results_dir = os.path.join(base_dir, "results")
-        modelos = ['ARIMAX', 'RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
+        modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
         bancos = ['Precio_Puro', 'Precio_Volumen', 'Tecnicos', 'Macros', 'Globales', 'Hibrido_Precio_Tec_Vol', 'Macro_Vol', 'Kitchen_Sink_Total', 'Total']
         
         series_retornos = {}
         
         for activo in activos:
-            tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir)
+            tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=False)
             campeones_tuple = tester.run_tournament(modelos, bancos)
             campeones = campeones_tuple[0]
             if not campeones:

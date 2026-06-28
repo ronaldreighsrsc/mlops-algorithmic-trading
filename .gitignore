@@ -26,7 +26,7 @@ data/raw/
 data/processed/
 *.sqlite3
 
-# Resultados y Modelos entrenados (Protección de Alpha e Hiperparámetros)
+# Resultados y Modelos entrenados
 results/
 
 # Caché de producción
@@ -34,3 +34,7 @@ cache/
 
 # Logs
 *.log
+
+# Gráficos de Backtest (contienen resultados financieros sensibles)
+portfolio_backtest_*.png
+global_portfolio_hrp.png

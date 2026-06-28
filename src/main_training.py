@@ -11,7 +11,6 @@ os.environ['PYTHONUNBUFFERED'] = '1'
 from sklearn.metrics import accuracy_score
 import tensorflow as tf
 
-from models.arimax import ARIMAXTrainer
 from models.random_forest import RandomForestTrainer
 from models.xgb_model import XGBoostTrainer
 from models.lstm_model import LSTMTrainer
@@ -28,7 +27,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # ⚠️ MODO RECUPERACIÓN (Crash RAM): Corriendo de a 1 activo.
 ACTIVOS_A_CORRER = ["ECH", "EURUSD", "SP500", "Oro"]
 MODELOS_A_CORRER = [
-    #'ARIMAX', # Muy lento, usar solo bajo demanda
     'RANDOM_FOREST',
     'XGBOOST', 
     'LSTM',
@@ -102,9 +100,7 @@ def train_for_asset(activo: str):
         print(f"\n{'#'*70}\n🏆 EVALUANDO MODELO: {nombre_modelo}\n{'#'*70}")
         
         # Instanciar el Trainer correspondiente
-        if nombre_modelo == 'ARIMAX':
-            trainer = ARIMAXTrainer(p_values=[1, 2], q_values=[1], retrain_step=60)
-        elif nombre_modelo == 'RANDOM_FOREST':
+        if nombre_modelo == 'RANDOM_FOREST':
             trainer = RandomForestTrainer(look_back=60, retrain_step=60)
         elif nombre_modelo == 'XGBOOST':
             trainer = XGBoostTrainer(look_back=60, retrain_step=60)
@@ -120,7 +116,7 @@ def train_for_asset(activo: str):
             continue
 
         # Target Check (Meta-Labeling vs Econometría)
-        if nombre_modelo in ['ARIMAX', 'ARIMA_LSTM']:
+        if nombre_modelo == 'ARIMA_LSTM':
             target_col = 'close_FFD'  # Los econométricos siguen usando el retorno continuo FFD
         else:
             target_col = 'Label'      # Los ML/DL usan la nueva etiqueta institucional Triple Barrera
@@ -131,12 +127,12 @@ def train_for_asset(activo: str):
             print(f"\n{'-'*50}\n🧠 BANCO: {nombre_banco} | MODELO: {nombre_modelo} | TARGET: {target_col}\n{'-'*50}")
             
             valid_features = [c for c in features if c in df_base.columns]
-            if not valid_features and nombre_modelo not in ['ARIMAX', 'ARIMA_LSTM']:
+            if not valid_features and nombre_modelo != 'ARIMA_LSTM':
                 print(f"  ⚠️ [SKIP] El banco '{nombre_banco}' no contiene variables válidas para el activo {activo} en el modelo {nombre_modelo}.")
                 continue
             
             # --- RUTAS DE EJECUCIÓN SEGÚN INTERFAZ DEL MODELO ---
-            if nombre_modelo in ['ARIMAX', 'ARIMA_LSTM']:
+            if nombre_modelo == 'ARIMA_LSTM':
                 if valid_features:
                     df_exog_lagged = df_base[valid_features].shift(1)
                     df_model = pd.concat([df_base[target_col], df_exog_lagged], axis=1).dropna()
@@ -148,17 +144,7 @@ def train_for_asset(activo: str):
                 target = df_model[target_col]
                 train_size = int(len(target) * 0.8)
                 
-                if nombre_modelo == 'ARIMAX':
-                    best_params = trainer.find_best_order(target.iloc[:train_size], exog.iloc[:train_size])
-                    # Generar In-Sample Probs (aproximado usando el modelo ajustado)
-                    import statsmodels.api as sm
-                    try:
-                        temp_model = sm.tsa.ARIMA(target.iloc[:train_size], exog=exog.iloc[:train_size] if not exog.empty else None, order=best_params).fit()
-                        train_probs = temp_model.predict(start=0, end=train_size-1).apply(lambda x: 1 if x > 0 else 0).values
-                    except:
-                        train_probs = np.zeros(train_size)
-                    pred_probs = trainer.walk_forward_predict(target, exog, train_size, best_params)
-                else: # ARIMA_LSTM
+                if nombre_modelo == 'ARIMA_LSTM':
                     best_params = trainer.find_best_params(target.iloc[:train_size], exog.iloc[:train_size], NN_GRID, n_iter=10)
                     pred_probs, _ = trainer.walk_forward_predict(target, exog, train_size, best_params)
                     

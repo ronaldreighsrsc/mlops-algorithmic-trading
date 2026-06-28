@@ -30,7 +30,6 @@ from models.lstm_model import LSTMTrainer
 from models.bilstm_model import BiLSTMTrainer
 from models.arima_lstm import HybridARIMALSTMTrainer
 from models.lstm_rf import HybridLSTMRFTrainer
-from models.arimax import ARIMAXTrainer
 
 # Forzar UTF-8
 sys.stdout.reconfigure(encoding='utf-8')
@@ -83,8 +82,6 @@ class TradingBot:
             self.model = HybridARIMALSTMTrainer.load(self.model_path)
         elif self.config["model_type"] == "LSTM_RF":
             self.model = HybridLSTMRFTrainer.load(self.model_path)
-        elif self.config["model_type"] == "ARIMAX":
-            self.model = ARIMAXTrainer.load(self.model_path)
         else:
             raise ValueError(f"Tipo de modelo no soportado: {self.config['model_type']}")
             

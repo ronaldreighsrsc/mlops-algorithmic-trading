@@ -30,10 +30,11 @@ class TripleBarrierBacktester:
     Simula inversiones reales usando las probabilidades generadas por los modelos,
     aplicando comisiones, slippage, limites de volatilidad y Monitor Híbrido LSTM.
     """
-    def __init__(self, activo: str, data_dir: str, results_dir: str):
+    def __init__(self, activo: str, data_dir: str, results_dir: str, fast_mode: bool = False):
         self.activo = activo
         self.data_dir = data_dir
         self.results_dir = results_dir
+        self.fast_mode = fast_mode
         
         # Friccion Institucional y Umbrales
         self.confidence_threshold = 0.60  # Solo operar si la probabilidad es > 60%
@@ -300,6 +301,10 @@ class TripleBarrierBacktester:
             print("  ⚠️ No se detectaron variables macro. HMM desactivado para este activo.")
             
         campeones = {}
+        
+        # Directorio para guardar/cargar modelos MLOps pre-entrenados
+        mlops_dir = os.path.join(self.results_dir, "mlops_monitors")
+        os.makedirs(mlops_dir, exist_ok=True)
 
         for modelo in modelos:
             mejor_alpha = -np.inf
@@ -317,26 +322,48 @@ class TripleBarrierBacktester:
                 
                 # 1. Fase de Calibración de Riesgo (Pre-entrenamiento In-Sample)
                 hybrid_monitor = HybridRiskMonitor()
-                if os.path.exists(train_probs_path):
-                    train_probs = np.load(train_probs_path)
-                    n_train = len(train_probs)
-                    df_train = df_processed.iloc[-(n_train + n_test) : -n_test].copy()
-                    
-                    if macro_cols:
+                
+                # Rutas de los modelos MLOps para esta combinación modelo/banco
+                mlops_prefix = f"{modelo.lower()}_{banco.lower()}_{self.activo}"
+                hmm_save_path = os.path.join(mlops_dir, f"{mlops_prefix}_hmm.pkl")
+                ae_save_path = os.path.join(mlops_dir, f"{mlops_prefix}_autoencoder")
+                
+                if self.fast_mode:
+                    # === MODO RÁPIDO: Cargar modelos MLOps pre-entrenados ===
+                    if macro_cols and os.path.exists(hmm_save_path):
                         from models.anomaly_detector import HMMRegimeDetector
                         hybrid_monitor.hmm_model = HMMRegimeDetector(n_components=3)
-                        X_macro_train = df_train[macro_cols].values
-                        hybrid_monitor.hmm_model.fit(X_macro_train)
-                        
-                    _, _, train_rolling_metrics = self.simulate_trades(df_train, train_probs, is_training_phase=True, macro_cols=macro_cols)
-                    
-                    if len(train_rolling_metrics) > 10:
+                        hybrid_monitor.hmm_model.load(hmm_save_path)
+                        print(f"  ⚡ HMM cargado desde disco para {modelo} ({banco})")
+                    if os.path.exists(f"{ae_save_path}.keras"):
                         from models.anomaly_detector import StrategyLSTMAutoencoder
-                        hybrid_monitor.lstm_model = StrategyLSTMAutoencoder(epochs=50, batch_size=4)
-                        X_train = np.array(train_rolling_metrics)
-                        hybrid_monitor.lstm_model.fit(X_train)
+                        hybrid_monitor.lstm_model = StrategyLSTMAutoencoder()
+                        hybrid_monitor.lstm_model.load(ae_save_path)
+                        print(f"  ⚡ Autoencoder cargado desde disco para {modelo} ({banco})")
                 else:
-                    print(f"  ⚠️ No se encontró train_probs para {modelo}. El Autoencoder no se activará.")
+                    # === MODO FULL: Entrenar desde cero y guardar a disco ===
+                    if os.path.exists(train_probs_path):
+                        train_probs = np.load(train_probs_path)
+                        n_train = len(train_probs)
+                        df_train = df_processed.iloc[-(n_train + n_test) : -n_test].copy()
+                        
+                        if macro_cols:
+                            from models.anomaly_detector import HMMRegimeDetector
+                            hybrid_monitor.hmm_model = HMMRegimeDetector(n_components=3)
+                            X_macro_train = df_train[macro_cols].values
+                            hybrid_monitor.hmm_model.fit(X_macro_train)
+                            hybrid_monitor.hmm_model.save(hmm_save_path)
+                            
+                        _, _, train_rolling_metrics = self.simulate_trades(df_train, train_probs, is_training_phase=True, macro_cols=macro_cols)
+                        
+                        if len(train_rolling_metrics) > 10:
+                            from models.anomaly_detector import StrategyLSTMAutoencoder
+                            hybrid_monitor.lstm_model = StrategyLSTMAutoencoder(epochs=50, batch_size=4)
+                            X_train = np.array(train_rolling_metrics)
+                            hybrid_monitor.lstm_model.fit(X_train)
+                            hybrid_monitor.lstm_model.save(ae_save_path)
+                    else:
+                        print(f"  ⚠️ No se encontró train_probs para {modelo} (Banco: {banco}). El Autoencoder no se activará para este banco.")
                     
                 # 2. Fase de Producción / Evaluación Out-Of-Sample
                 df_backtest = df_processed.iloc[-n_test:].copy()
@@ -651,7 +678,7 @@ def main():
     bancos = ['Precio_Puro', 'Tecnicos', 'Total']
     
     for activo in activos:
-        backtester = TripleBarrierBacktester(activo, data_dir, results_dir)
+        backtester = TripleBarrierBacktester(activo, data_dir, results_dir, fast_mode=True)
         campeones, df_backtest = backtester.run_tournament(modelos, bancos)
         if campeones:
             backtester.generate_html_report(campeones)
