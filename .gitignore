@@ -26,10 +26,8 @@ data/raw/
 data/processed/
 *.sqlite3
 
-# Modelos entrenados (pesados, se regeneran con main_training.py)
-results/saved_models/*.keras
-results/saved_models/*.pkl
-results/*.npy
+# Resultados y Modelos entrenados (Protección de Alpha e Hiperparámetros)
+results/
 
 # Caché de producción
 cache/
