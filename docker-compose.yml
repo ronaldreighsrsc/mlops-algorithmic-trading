@@ -1,0 +1,23 @@
+version: '3.8'
+
+services:
+  trading-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mlops-trading-bot
+    restart: unless-stopped
+    # Montaje de Volúmenes (El secreto para leer los modelos pesados sin subirlos a Git)
+    volumes:
+      # Mapea la carpeta local "results" hacia adentro del contenedor
+      - ./results:/app/results
+      # Mapea los logs para poder revisarlos desde el host físico
+      - ./bot_logs:/app/bot_logs
+    # Archivo de credenciales ocultas
+    env_file:
+      - .env
+    # Limitar recursos (Opcional, para que no consuma toda la RAM del servidor)
+    deploy:
+      resources:
+        limits:
+          memory: 4G

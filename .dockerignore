@@ -1,0 +1,29 @@
+# Git
+.git
+.gitignore
+
+# Entornos virtuales locales
+venv/
+env/
+ENV/
+
+# Archivos compilados de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDEs
+.vscode/
+.idea/
+
+# Datos y Resultados Locales
+# (Los resultados se montarán vía Volúmenes, NO deben copiarse al construir la imagen)
+data/
+results/
+cache/
+
+# Logs Locales
+*.log
+
+# Jupyter Notebooks
+.ipynb_checkpoints
