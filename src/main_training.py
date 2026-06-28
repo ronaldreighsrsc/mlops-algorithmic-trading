@@ -26,15 +26,15 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # CONFIGURACIÓN DEL EXPERIMENTO
 # ==============================================================================
 # ⚠️ MODO RECUPERACIÓN (Crash RAM): Corriendo de a 1 activo.
-ACTIVOS_A_CORRER = ["Oro"] # ["ECH", "EURUSD", "SP500", "Oro"]
+ACTIVOS_A_CORRER = ["ECH", "EURUSD", "SP500", "Oro"]
 MODELOS_A_CORRER = [
-    #'ARIMAX', 
+    #'ARIMAX', # Muy lento, usar solo bajo demanda
     'RANDOM_FOREST',
     'XGBOOST', 
     'LSTM',
     'BILSTM',
     'ARIMA_LSTM',
-    'LSTM_RF' # Solo falta este para terminar EURUSD
+    'LSTM_RF' 
 ]
 
 # Grillas de Hiperparámetros (Distribuciones para Randomized Search)
@@ -164,8 +164,12 @@ def train_for_asset(activo: str):
                     
                     # Generar In-Sample Probs reales para ARIMA-LSTM
                     try:
-                        arima_fitted = trainer.model_arima_curr.fittedvalues
-                        train_resids_full = target.iloc[:train_size] - arima_fitted.iloc[:train_size]
+                        from statsmodels.tsa.arima.model import ARIMA
+                        import warnings
+                        with warnings.catch_warnings():
+                            warnings.simplefilter("ignore")
+                            arima_initial = ARIMA(target.iloc[:train_size], order=trainer.best_params['arima_order']).fit()
+                        train_resids_full = target.iloc[:train_size] - arima_initial.fittedvalues
                         X_tr_raw, y_tr_raw, n_f = trainer._create_3d_sequences(
                             train_resids_full, 
                             exog.iloc[:train_size] if not exog.empty else None, 
