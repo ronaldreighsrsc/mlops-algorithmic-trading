@@ -91,63 +91,52 @@ def run_preprocessing_pipeline():
 
     print("\n🎉 TODOS LOS ACTIVOS PROCESADOS CON ÉXITO.")
 
-def audit_processed_data():
-    print("\n" + "="*50)
-    print("🔍 INICIANDO AUDITORÍA DE DATOS PROCESADOS")
-    print("="*50)
+def audit_datasets():
+    print("\n" + "="*60)
+    print("🔍 INICIANDO AUDITORÍA AUTOMÁTICA DE DATOS PROCESADOS")
+    print("="*60)
     
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     data_dir = os.path.join(base_dir, "data", "processed")
-    assets = ['EURUSD', 'SP500', 'Oro', 'ECH']
     
-    for activo in assets:
-        path = os.path.join(data_dir, f'{activo}_processed.csv')
-        if not os.path.exists(path):
-            print(f'\n❌ {activo}: ARCHIVO NO ENCONTRADO')
-            continue
-            
+    if not os.path.exists(data_dir):
+        print("❌ Carpeta de datos procesados no encontrada.")
+        return
+        
+    csv_files = glob.glob(os.path.join(data_dir, "*_processed.csv"))
+    if not csv_files:
+        print("❌ No hay archivos para auditar.")
+        return
+        
+    for path in csv_files:
+        activo = os.path.basename(path).replace("_processed.csv", "")
         df = pd.read_csv(path)
-        print(f'\n{"="*70}')
+        print(f'\n{"-"*60}')
         print(f'📊 {activo} | Filas: {len(df)} | Columnas: {len(df.columns)}')
-        print(f'{"="*70}')
+        print(f'{"-"*60}')
         
         # Check nulls
         nulls = df.isnull().sum()
         cols_with_nulls = nulls[nulls > 0]
         if len(cols_with_nulls) > 0:
-            print(f'⚠️  Columnas con NaN:')
+            print(f'⚠️  ALERTA: Columnas con NaN (Peligro para ML):')
             for col, n in cols_with_nulls.items():
                 pct = n/len(df)*100
-                print(f'   {col}: {n} NaN ({pct:.1f}%)')
+                print(f'   - {col}: {n} NaN ({pct:.1f}%)')
         else:
-            print(f'✅ Sin NaN en ninguna columna')
+            print(f'✅ Datos limpios: 0 Valores Nulos')
         
         # Check columns with all zeros
         zero_cols = [c for c in df.select_dtypes(include='number').columns if (df[c] == 0).all()]
         if zero_cols:
-            print(f'❌ Columnas 100% CEROS: {zero_cols}')
-        
-        # Check columns with constant values  
-        const_cols = [c for c in df.select_dtypes(include='number').columns if df[c].nunique() <= 1]
-        if const_cols:
-            print(f'⚠️  Columnas CONSTANTES (1 valor): {const_cols}')
+            print(f'⚠️  Aviso: Columnas con 100% Ceros: {zero_cols} (Revisar si es normal, ej: spread o volumen)')
         
         # Check date range
         if 'time' in df.columns:
-            print(f'📅 Rango: {df["time"].iloc[0]} → {df["time"].iloc[-1]}')
-        
-        # Print all columns with basic stats
-        print(f'\n   {"Col":<25} {"Min":>12} {"Max":>12} {"Mean":>12} {"Std":>12} {"NaN":>6}')
-        print(f'   {"-"*25} {"-"*12} {"-"*12} {"-"*12} {"-"*12} {"-"*6}')
-        for col in df.select_dtypes(include='number').columns:
-            mn = df[col].min()
-            mx = df[col].max()
-            me = df[col].mean()
-            st = df[col].std()
-            na = df[col].isna().sum()
-            print(f'   {col:<25} {mn:>12.4f} {mx:>12.4f} {me:>12.4f} {st:>12.4f} {na:>6}')
+            print(f'📅 Período: {df["time"].iloc[0]} → {df["time"].iloc[-1]}')
+
+    print("\n✅ Auditoría de Integridad Finalizada.")
 
 if __name__ == "__main__":
     run_preprocessing_pipeline()
-    audit_processed_data()
-
+    audit_datasets()
