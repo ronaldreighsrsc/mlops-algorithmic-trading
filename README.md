@@ -23,8 +23,8 @@ En la versión actual, el sistema implementa una arquitectura robusta de control
 ### 1. Cuarentena por Anomalías Microestructurales (Soft-Stop)
 Utilizamos un **LSTM Autoencoder** pre-entrenado que funciona como un *Hybrid Risk Monitor*. Escucha la distribución de los últimos 10-30 trades. Si detecta una perturbación matemática aguda (el error de reconstrucción supera el P99) que provoca más de 3% de pérdida rápida, **el modelo entra en Cuarentena de 60 días**. Pasa a efectivo (Cash) para permitir que el proceso de *Walk-Forward* re-aprenda el nuevo régimen de mercado. A los 60 días, resucita.
 
-### 2. Alpha Decay y Muerte Permanente (Hard Kill-Switch)
-Si el mercado sufre un cambio fundamental incorregible, la estrategia sufrirá el llamado "Alpha Decay". Si la estrategia **supera un Maximum Drawdown (MDD) de -15% desde su pico de capital histórico**, es declarada matemáticamente muerta (`💀 MUERTO`). **No resucita nunca más.** Queda vetada del entorno de Producción hasta que se corra un Hyperparameter Retuning masivo.
+### 2. Alpha Decay y Muerte Permanente (Hard Kill-Switch Dinámico)
+Si el mercado sufre un cambio fundamental incorregible, la estrategia sufrirá el llamado "Alpha Decay". El sistema calcula estadísticamente el Riesgo de Ruina basándose en tu `RIESGO_PCT` (por defecto 2.5%). Si la estrategia **supera un Maximum Drawdown (MDD) equivalente a 10 pérdidas máximas consecutivas (ej. -25% para un riesgo del 2.5%)** desde su pico de capital histórico, es declarada matemáticamente muerta (`💀 MUERTO`). **No resucita nunca más.** Queda vetada del entorno de Producción hasta que se corra un Hyperparameter Retuning masivo.
 
 ### 3. Detector de Vejez (Concept Drift Detector)
 La estadística del mercado envejece. El sistema calcula constantemente la Mediana del Error de Reconstrucción de los últimos 30 trades en producción y lo compara contra la frontera P90 del entrenamiento In-Sample. Si la mediana reciente rompe esta frontera, el sistema avisa que **el modelo está estadísticamente obsoleto (Concept Drift)** y requiere re-entrenamiento (Retuning) urgente, sin necesidad de esperar a sufrir pérdidas severas.
