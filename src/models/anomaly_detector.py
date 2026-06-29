@@ -50,6 +50,8 @@ class StrategyLSTMAutoencoder:
     def fit(self, X_train: np.ndarray):
         """Entrena el LSTM Autoencoder con las métricas móviles in-sample."""
         print("  🧠 Entrenando LSTM Autoencoder (Operación Normal In-Sample)...")
+        keras.backend.clear_session()  # Limpia el grafo viejo de TF de la RAM
+        
         X_scaled = self.scaler.fit_transform(X_train)
         X_3d = np.expand_dims(X_scaled, axis=1)
 
