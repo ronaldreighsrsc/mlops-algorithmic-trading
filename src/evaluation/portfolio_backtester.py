@@ -18,7 +18,8 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     results_dir = os.path.join(base_dir, "results")
     from main_training import get_bancos_por_activo
     
-    tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=fast_mode)
+    # Le pasamos el riesgo dinámico para que el MDD Kill-Switch escale
+    tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=fast_mode, base_risk=riesgo_por_trade)
     modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
     bancos = list(get_bancos_por_activo(activo).keys())
     

@@ -30,11 +30,12 @@ class TripleBarrierBacktester:
     Simula inversiones reales usando las probabilidades generadas por los modelos,
     aplicando comisiones, slippage, limites de volatilidad y Monitor Híbrido LSTM.
     """
-    def __init__(self, activo: str, data_dir: str, results_dir: str, fast_mode: bool = False):
+    def __init__(self, activo, data_dir, results_dir, fast_mode=False, base_risk=0.01):
         self.activo = activo
         self.data_dir = data_dir
         self.results_dir = results_dir
         self.fast_mode = fast_mode
+        self.base_risk = base_risk
         
         # Friccion Institucional y Umbrales
         self.confidence_threshold = 0.60  # Solo operar si la probabilidad es > 60%
@@ -243,7 +244,11 @@ class TripleBarrierBacktester:
                     peak_equity = current_equity
                     
                 drawdown = (current_equity / peak_equity) - 1.0
-                if drawdown <= -0.15:  # Caída del 15% desde su pico histórico
+                
+                # Dynamic Kill-Switch basado en Riesgo Base (ej. 1% * 15 = 15% MDD)
+                mdd_threshold = -(self.base_risk * 15.0)
+                
+                if drawdown <= mdd_threshold:
                     is_dead = True
                     i += trade_duration
                     continue
@@ -683,7 +688,7 @@ def main():
     
     for activo in activos:
         bancos = list(get_bancos_por_activo(activo).keys())
-        backtester = TripleBarrierBacktester(activo, data_dir, results_dir, fast_mode=True)
+        backtester = TripleBarrierBacktester(activo, data_dir, results_dir, fast_mode=True, base_risk=0.01)
         campeones, df_backtest = backtester.run_tournament(modelos, bancos)
         if campeones:
             backtester.generate_html_report(campeones)
