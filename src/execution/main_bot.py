@@ -51,8 +51,7 @@ class TradingBot:
         self.risk_manager = RiskManager(
             risk_per_trade_pct=0.025,
             k_up=config["k_up"],
-            k_down=config["k_down"],
-            cusum_threshold=config["cusum_threshold"]
+            k_down=config["k_down"]
         )
         self.notifier = TelegramNotifier()
         
@@ -107,13 +106,13 @@ class TradingBot:
 
     def fetch_live_data(self) -> pd.DataFrame:
         """Descarga las ultimas velas necesarias para generar las variables (ej. FFD, EGARCH)"""
+        import yfinance as yf
+        from datetime import timedelta
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=3000)
+        
         if self.symbol == "ECH":
-            import yfinance as yf
-            from datetime import timedelta
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=600)
             df = yf.download(self.symbol, start=start_date, end=end_date, progress=False)
-            
             if df.empty:
                 logging.error(f"Fallo al descargar datos live para {self.symbol} vía yfinance.")
                 return pd.DataFrame()
@@ -126,21 +125,40 @@ class TradingBot:
             df.index = df.index.tz_localize(None).normalize()
             df.index.name = 'time'
             
-            # Macro VIX DXY
-            vix = yf.download("^VIX", start=start_date, end=end_date, progress=False)
-            dxy = yf.download("DX-Y.NYB", start=start_date, end=end_date, progress=False)
-            macro_df = pd.DataFrame()
-            if not vix.empty:
-                macro_df['VIX_close'] = vix['Close'].iloc[:, 0] if isinstance(vix.columns, pd.MultiIndex) else vix['Close']
-            if not dxy.empty:
-                macro_df['DXY_close'] = dxy['Close'].iloc[:, 0] if isinstance(dxy.columns, pd.MultiIndex) else dxy['Close']
-            macro_df.index = macro_df.index.tz_localize(None).normalize()
+        else:
+            # Flujo normal para MT5
+            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 2000)
+            if rates is None or len(rates) == 0:
+                logging.error("No se pudieron obtener datos historicos de MT5.")
+                return pd.DataFrame()
+                
+            df = pd.DataFrame(rates)
+            df['time'] = pd.to_datetime(df['time'], unit='s')
+            df.set_index('time', inplace=True)
+            df.index = df.index.normalize()
+
+        # --- Descargar Macro Global ---
+        vix = yf.download("^VIX", start=start_date, end=end_date, progress=False)
+        dxy = yf.download("DX-Y.NYB", start=start_date, end=end_date, progress=False)
+        tnx = yf.download("^TNX", start=start_date, end=end_date, progress=False)
+        
+        macro_df = pd.DataFrame()
+        if not vix.empty:
+            macro_df['VIX_close'] = vix['Close'].iloc[:, 0] if isinstance(vix.columns, pd.MultiIndex) else vix['Close']
+        if not dxy.empty:
+            macro_df['DXY_close'] = dxy['Close'].iloc[:, 0] if isinstance(dxy.columns, pd.MultiIndex) else dxy['Close']
+        if not tnx.empty:
+            macro_df['Yield10Y'] = tnx['Close'].iloc[:, 0] if isinstance(tnx.columns, pd.MultiIndex) else tnx['Close']
             
-            df = df.join(macro_df, how='left')
-            if 'VIX_close' in df.columns: df['VIX_close'] = df['VIX_close'].ffill().bfill()
-            if 'DXY_close' in df.columns: df['DXY_close'] = df['DXY_close'].ffill().bfill()
-            
-            # Macro ECH
+        macro_df.index = macro_df.index.tz_localize(None).normalize()
+        
+        df = df.join(macro_df, how='left')
+        if 'VIX_close' in df.columns: df['VIX_close'] = df['VIX_close'].ffill().bfill()
+        if 'DXY_close' in df.columns: df['DXY_close'] = df['DXY_close'].ffill().bfill()
+        if 'Yield10Y' in df.columns: df['Yield10Y'] = df['Yield10Y'].ffill().bfill()
+
+        # --- Descargar Macro Chile (Solo si es ECH) ---
+        if self.symbol == "ECH":
             import sys
             import os
             sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/..")
@@ -152,48 +170,10 @@ class TradingBot:
                 cols_chile = df_chile.columns
                 df[cols_chile] = df[cols_chile].ffill().bfill()
                 
-            df.reset_index(inplace=True)
-            return df
-
-        # Flujo normal para MT5
-        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 2000)
-        if rates is None or len(rates) == 0:
-            logging.error("No se pudieron obtener datos historicos de MT5.")
-            return pd.DataFrame()
-            
-        df = pd.DataFrame(rates)
-        df['time'] = pd.to_datetime(df['time'], unit='s')
-        df.set_index('time', inplace=True)
+        df.reset_index(inplace=True)
         return df
 
-    def sync_cusum_from_history(self):
-        """Revisa los trades cerrados recientemente en MT5 para alimentar el CUSUM."""
-        from datetime import timedelta
-        
-        # Revisamos los ultimos 30 dias de historial
-        from_date = datetime.now() - timedelta(days=30)
-        to_date = datetime.now()
-        
-        deals = mt5.history_deals_get(from_date, to_date)
-        if deals is None:
-            return
-            
-        # Reiniciar el CUSUM para recalcularlo limpio con el historial reciente
-        self.risk_manager.cusum.S_neg = 0.0
-        
-        # Filtramos tratos que fueron de 'salida' (cierre de posicion) con nuestro magic number
-        bot_deals = [d for d in deals if d.magic == self.engine.magic_number and d.entry == mt5.DEAL_ENTRY_OUT]
-        
-        # Ordenamos cronologicamente
-        bot_deals.sort(key=lambda x: x.time)
-        
-        account_info = mt5.account_info()
-        balance_actual = account_info.balance if account_info else 10000.0
-        
-        for deal in bot_deals:
-            # Calculamos el retorno porcentual estimado del trade respecto al balance
-            profit_pct = deal.profit / balance_actual
-            self.risk_manager.cusum.update_and_check(profit_pct)
+
 
     def _predict_bilstm(self, df_proc: pd.DataFrame) -> float:
         """Genera predicción usando el modelo BiLSTM."""
@@ -257,6 +237,23 @@ class TradingBot:
         prob = self.model.master_lstm.predict(curr_win_scaled, verbose=0)[0][0]
         return float(prob)
 
+    def _predict_xgboost(self, df_proc: pd.DataFrame) -> float:
+        """Genera predicción usando el modelo XGBOOST (o Random Forest)."""
+        feature_cols = self.config["features"]
+        look_back = self.model.look_back
+        dataset = df_proc[feature_cols].values
+        
+        if len(dataset) < look_back:
+            logging.warning("No hay suficientes datos para armar la secuencia tabular.")
+            return -1.0
+            
+        window = dataset[-look_back:]
+        window_flat = window.flatten().reshape(1, -1)
+        window_scaled = np.clip(self.model.scaler.transform(window_flat), -10, 10)
+        
+        prob = self.model.master_model.predict_proba(window_scaled)[0][1]
+        return float(prob)
+
     def check_for_signals(self):
         """Metodo principal ejecutado en cada nueva vela."""
         if not self.connector.connected:
@@ -281,13 +278,7 @@ class TradingBot:
         logging.info(f"NUEVA VELA DETECTADA. Procesando señal para {self.symbol}...")
         self.last_bar_time = current_bar_time
 
-        # 2. Sincronizar historial de trades para actualizar el CUSUM
-        self.sync_cusum_from_history()
-        if self.risk_manager.cusum.S_neg <= -self.risk_manager.cusum.threshold:
-            logging.error("🚨 ALERTA ROJA: El filtro CUSUM ha detectado la degradación/muerte de la estrategia.")
-            self.notifier.alert_cusum_death(self.risk_manager.cusum.S_neg, self.risk_manager.cusum.threshold)
-            self.connector.shutdown()
-            sys.exit(1)
+        # 2. (Legacy CUSUM eliminado — reemplazado por Shadow Journal + HybridRiskMonitor)
 
         # 3. Verificar si ya tenemos un trade corriendo
         if self.engine.has_open_positions(self.symbol):
@@ -319,10 +310,12 @@ class TradingBot:
             return # Permiso denegado por MLOps
         
         # 5. Prediccion del Modelo Campeon
-        if self.config["model_type"] == "BILSTM":
+        if self.config["model_type"] == "BILSTM" or self.config["model_type"] == "LSTM" or self.config["model_type"] == "LSTM_RF":
             prob = self._predict_bilstm(df_proc)
         elif self.config["model_type"] == "ARIMA_LSTM":
             prob = self._predict_arima_lstm(df_proc, df_raw)
+        elif self.config["model_type"] == "XGBOOST" or self.config["model_type"] == "RANDOM_FOREST":
+            prob = self._predict_xgboost(df_proc)
         else:
             logging.error(f"Tipo de modelo no soportado: {self.config['model_type']}")
             return
@@ -455,9 +448,23 @@ class TradingBot:
                     pred_probs = np.pad(probs_batch, (look_back, 0), 'constant')
                 else:
                     return True 
+            elif self.config["model_type"] in ["XGBOOST", "RANDOM_FOREST"]:
+                look_back = self.model.look_back
+                dataset = df_eval[self.config["features"]].values
+                X_batch = []
+                for i in range(look_back, len(dataset)):
+                    window = dataset[i-look_back:i]
+                    X_batch.append(window.flatten())
+                if X_batch:
+                    X_batch = np.array(X_batch)
+                    X_batch_scaled = np.clip(self.model.scaler.transform(X_batch), -10, 10)
+                    probs_batch = self.model.master_model.predict_proba(X_batch_scaled)[:, 1]
+                    pred_probs = np.pad(probs_batch, (look_back, 0), 'constant')
+                else:
+                    return True
             else:
                 logging.info(f"[{self.symbol}] Shadow Journal no soportado en batch para {self.config['model_type']}. Saltando check de Cuarentena.")
-                return True 
+                return True
         except Exception as e:
             logging.error(f"[{self.symbol}] Error generando probabilidades en Shadow Journal: {e}")
             return True
@@ -475,14 +482,37 @@ class TradingBot:
                 X_window = np.array(rolling_metrics[-30:])
                 concept_drift = self.risk_manager.hybrid_monitor.lstm_model.check_concept_drift(X_window)
                 
+        lock_file = os.path.join(base_dir, "cache", f"quarantine_{self.symbol}.lock")
+        
         if is_dead:
             logging.warning(f"[{self.symbol}] 🚨 SHADOW JOURNAL RECHAZA OPERACIÓN: El modelo está en Cuarentena por Anomalías o Muerte por MDD.")
-            # Notificación silenciada aquí para no saturar, pero bloquea el trade
+            
+            # Verificar si ya notificamos (para evitar spam diario)
+            if not os.path.exists(lock_file):
+                self.notifier.alert_mlops_quarantine(self.symbol)
+                os.makedirs(os.path.dirname(lock_file), exist_ok=True)
+                with open(lock_file, "w") as f:
+                    f.write("quarantined")
+            
             return False
             
+        # Si NO está en cuarentena, revisamos si estaba castigado ayer (Lock file) y lo levantamos
+        if os.path.exists(lock_file):
+            self.notifier.alert_mlops_resurrection(self.symbol)
+            os.remove(lock_file)
+            
+        concept_drift_lock = os.path.join(base_dir, "cache", f"concept_drift_{self.symbol}.lock")
+        
         if concept_drift:
             logging.warning(f"[{self.symbol}] ⚠️ CONCEPT DRIFT: Régimen de mercado alterado (Vejez del filtro). Se recomienda Retuning masivo.")
-            # No bloqueamos, es solo una advertencia
+            if not os.path.exists(concept_drift_lock):
+                self.notifier.alert_concept_drift(self.symbol)
+                os.makedirs(os.path.dirname(concept_drift_lock), exist_ok=True)
+                with open(concept_drift_lock, "w") as f:
+                    f.write("drifted")
+        else:
+            if os.path.exists(concept_drift_lock):
+                os.remove(concept_drift_lock)
             
         logging.info(f"[{self.symbol}] ✅ Shadow Journal: Permiso concedido para operar.")
         return True
@@ -571,8 +601,7 @@ if __name__ == "__main__":
         with open(json_path, 'r', encoding='utf-8') as f:
             config = json.load(f)
             
-        # Añadir parametro cusum_threshold = 0 temporalmente para compatibilidad con RiskManager antiguo
-        config['cusum_threshold'] = 0.0
+
             
         model_path = os.path.join(models_dir, config["model_file"])
         if os.path.exists(model_path):

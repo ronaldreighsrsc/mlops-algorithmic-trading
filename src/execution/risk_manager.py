@@ -59,13 +59,12 @@ class RiskManager:
     """
     Gestor de Riesgo y Position Sizing para el Bot Cuantitativo.
     """
-    def __init__(self, risk_per_trade_pct: float = 0.01, k_up: float = 2.0, k_down: float = 1.5, max_hold: int = 10, cusum_threshold: float = 0.05):
+    def __init__(self, risk_per_trade_pct: float = 0.01, k_up: float = 2.0, k_down: float = 1.5, max_hold: int = 10):
         """
         :param risk_per_trade_pct: Porcentaje del balance a arriesgar (ej. 0.01 = 1%)
         :param k_up: Multiplicador de volatilidad para el Take Profit
         :param k_down: Multiplicador de volatilidad para el Stop Loss
         :param max_hold: Maximo de velas a mantener el trade abierto
-        :param cusum_threshold: Límite para declarar la estrategia muerta
         """
         self.risk_per_trade_pct = risk_per_trade_pct
         self.k_up = k_up

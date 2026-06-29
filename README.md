@@ -121,6 +121,26 @@ python src/execution/main_bot.py
 ```
 *El ciclo de vida final. El bot carga al campeón desde su `.json` y extrae los pesos MLOps (`.keras`, `.pkl`). Ejecuta su **Shadow Journal** evaluando los últimos 300 días para auto-diagnosticar su salud (Cuarentena / Concept Drift). Si el diagnóstico es exitoso (`✅ Shadow Journal OK`), procesa la última vela de hoy y dispara la orden de compra/venta a MT5 (o alerta Telegram para ECH) usando dimensionamiento Kelly.*
 
+### 5. Automatización en Servidor AWS / VPS (Recomendado)
+Para que el bot corra 24/7 y sobreviva a reinicios automáticos de AWS (parches de Windows), **NO** se debe usar un arranque en modo servicio ("Session 0"), ya que MetaTrader 5 requiere entorno gráfico (GUI) para funcionar sin crashear. 
+
+Sigue estos 2 pasos para configurarlo correctamente de manera institucional:
+
+**Paso 1: Activar Auto-Login en Windows Server**
+1. Abre el Símbolo del Sistema (CMD) como Administrador y ejecuta este comando para destrabar la configuración oculta de Windows:
+   `reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device" /v DevicePasswordLessBuildVersion /t REG_DWORD /d 0 /f`
+2. Presiona `Win + R`, escribe `netplwiz` y dale a Enter.
+3. Desmarca la casilla *"Users must enter a user name and password to use this computer"*.
+4. Dale a Aplicar, introduce tu contraseña de Administrator dos veces y acepta. (Ahora el servidor iniciará sesión y cargará el escritorio automáticamente al encender).
+
+**Paso 2: Crear la Tarea Programada (Al Iniciar Sesión)**
+Abre CMD como Administrador y crea la tarea para que lance el archivo `.bat` justo cuando el escritorio cargue:
+```cmd
+schtasks /create /tn "QuantBot_Trading" /tr "C:\Users\Administrator\Desktop\quant-trading-bot\start_bot.bat" /sc onlogon /ru "Administrator" /rl highest /f
+```
+> [!IMPORTANT]
+> Observa el parámetro `/sc onlogon` (Al iniciar sesión). Usar `/sc onstart` (Al encender) ejecutará el bot oculto en el fondo, impidiéndote ver los gráficos de MT5 e inestabilizando la conexión Python-MT5.
+
 ## ⚙️ Configuración del Entorno
 
 1. **Python 3.12 (64-bits)** requerido.

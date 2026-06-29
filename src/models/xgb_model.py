@@ -149,6 +149,10 @@ class XGBoostTrainer:
             print("  ⚠️ No best_params found. Cannot fast retrain.")
             return
             
+        if target_col not in df.columns:
+            # En producción live no calculamos Label (requiere ver el futuro)
+            return
+            
         df_valid = df.dropna(subset=[target_col])
         if len(df_valid) == 0:
             return

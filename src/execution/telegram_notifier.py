@@ -61,14 +61,22 @@ class TelegramNotifier:
         # Calcular riesgo en dolares y pips para referencia
         sl_pips = abs(price - sl) * 10000
         tp_pips = abs(tp - price) * 10000
-        riesgo_usd = account_balance * risk_pct
+        # Lógica exclusiva para Quantfury (Manual)
+        quantfury_balance = float(os.getenv("QUANTFURY_BALANCE", 2000.0))
+        quantfury_max_power = float(os.getenv("QUANTFURY_MAX_POWER", 40000.0))
         
-        # Calcular Trading Power exacto para Quantfury
+        riesgo_manual_usd = quantfury_balance * risk_pct
+        
         if price != sl:
             porcentaje_movimiento_sl = abs(price - sl) / price
-            quantfury_trading_power = riesgo_usd / porcentaje_movimiento_sl
+            quantfury_trading_power = riesgo_manual_usd / porcentaje_movimiento_sl
         else:
             quantfury_trading_power = 0.0
+            
+        warning_leverage = ""
+        if quantfury_trading_power > quantfury_max_power:
+            quantfury_trading_power = quantfury_max_power
+            warning_leverage = f"\n⚠️ *MAX LEVERAGE ALCANZADO*: Limitado al tope de ${quantfury_max_power:,.2f}"
             
         direccion_str = "COMPRA (Long) 📈" if is_long else "VENTA (Short) 📉"
         
@@ -79,22 +87,41 @@ class TelegramNotifier:
             f"🎯 Take Profit:    `{tp:.5f}` (+{tp_pips:.0f} pips)\n"
             f"🛡️ Stop Loss:      `{sl:.5f}` (-{sl_pips:.0f} pips)\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
-            f"🤖 *Ejecución MT5 (Automática)*\n"
+            f"🤖 *Ejecución MT5 (Automática Demo/Real)*\n"
+            f"💵 Balance Asumido: ${account_balance:.2f}\n"
             f"📦 Lotes inyectados en MT5: `{volume}` Lotes\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📱 *Ejecución Manual (Quantfury)*\n"
-            f"💵 Balance Asumido: ${account_balance:.2f}\n"
-            f"⚠️ Riesgo Matemático a Perder: ${riesgo_usd:.2f} USD\n"
-            f"👉 _Poder de Trading (Trading Power):_ Escribe exactamente `$ {quantfury_trading_power:.2f}` en la caja de volumen de Quantfury."
+            f"💵 Balance Asumido: ${quantfury_balance:,.2f} USDT\n"
+            f"⚠️ Riesgo Matemático a Perder: ${riesgo_manual_usd:,.2f} USDT\n"
+            f"👉 _Poder de Trading:_ Escribe exactamente `$ {quantfury_trading_power:,.2f}` en Quantfury.{warning_leverage}"
         )
         self.send_message(msg)
-        
-    def alert_cusum_death(self, cusum_val: float, threshold: float):
+
+    def alert_mlops_quarantine(self, symbol: str):
         msg = (
-            f"🚨 *ALERTA ROJA (CUSUM)* 🚨\n"
-            f"La estrategia ha alcanzado el límite de degradación.\n"
-            f"Suma Negativa: {cusum_val:.2%}\n"
-            f"Límite Máximo: {-threshold:.2%}\n\n"
-            f"🛑 *BOT APAGADO* para proteger el capital institucional."
+            f"🚨 *CUARENTENA MLOps ACTIVADA* 🚨\n"
+            f"Activo: {symbol}\n"
+            f"El *Shadow Journal* detectó anomalías estructurales (Autoencoder) o Alpha Decay (MDD).\n"
+            f"🛑 *Trade Bloqueado.* El modelo entra en cuarentena silenciosa para proteger el capital institucional."
         )
         self.send_message(msg)
+
+    def alert_mlops_resurrection(self, symbol: str):
+        msg = (
+            f"✅ *CUARENTENA MLOps LEVANTADA* ✅\n"
+            f"Activo: {symbol}\n"
+            f"El *Shadow Journal* evaluó los últimos 300 días y confirmó que la estadística volvió a la normalidad.\n"
+            f"▶️ *Operaciones reactivadas.*"
+        )
+        self.send_message(msg)
+
+    def alert_concept_drift(self, symbol: str):
+        msg = (
+            f"⚠️ *AVISO DE MANTENIMIENTO: CONCEPT DRIFT* ⚠️\n"
+            f"Activo: {symbol}\n"
+            f"El filtro de anomalías (Autoencoder) está envejeciendo. La mediana de errores recientes superó el límite P90 del entrenamiento.\n"
+            f"👉 *Recomendación:* El bot seguirá operando, pero se sugiere correr el `portfolio_backtester.py` este fin de semana para refrescar y re-entrenar la estadística MLOps."
+        )
+        self.send_message(msg)
+

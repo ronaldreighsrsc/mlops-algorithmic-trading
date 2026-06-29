@@ -29,8 +29,9 @@ data/processed/
 # Resultados y Modelos entrenados
 results/
 
-# Caché de producción
+# Caché de producción y Cuarentenas MLOps
 cache/
+*.lock
 
 # Logs
 *.log
