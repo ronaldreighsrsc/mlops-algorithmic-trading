@@ -148,7 +148,7 @@ if __name__ == "__main__":
         series_retornos = {}
         
         for activo in activos:
-            tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=False)
+            tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=True)
             campeones_tuple = tester.run_tournament(modelos, bancos)
             campeones = campeones_tuple[0]
             if not campeones:
