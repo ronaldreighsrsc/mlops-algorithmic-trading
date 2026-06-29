@@ -8,6 +8,7 @@ sys.stderr.reconfigure(encoding='utf-8')
 from preprocessing.technical_features import TechnicalFeatureEngineer
 from preprocessing.volatility import VolatilityModeler
 from preprocessing.stationarity import FractionalDifferencer
+from preprocessing.auditor import DataAuditor
 
 warnings.filterwarnings("ignore")
 
@@ -91,52 +92,11 @@ def run_preprocessing_pipeline():
 
     print("\n🎉 TODOS LOS ACTIVOS PROCESADOS CON ÉXITO.")
 
-def audit_datasets():
-    print("\n" + "="*60)
-    print("🔍 INICIANDO AUDITORÍA AUTOMÁTICA DE DATOS PROCESADOS")
-    print("="*60)
-    
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    data_dir = os.path.join(base_dir, "data", "processed")
-    
-    if not os.path.exists(data_dir):
-        print("❌ Carpeta de datos procesados no encontrada.")
-        return
-        
-    csv_files = glob.glob(os.path.join(data_dir, "*_processed.csv"))
-    if not csv_files:
-        print("❌ No hay archivos para auditar.")
-        return
-        
-    for path in csv_files:
-        activo = os.path.basename(path).replace("_processed.csv", "")
-        df = pd.read_csv(path)
-        print(f'\n{"-"*60}')
-        print(f'📊 {activo} | Filas: {len(df)} | Columnas: {len(df.columns)}')
-        print(f'{"-"*60}')
-        
-        # Check nulls
-        nulls = df.isnull().sum()
-        cols_with_nulls = nulls[nulls > 0]
-        if len(cols_with_nulls) > 0:
-            print(f'⚠️  ALERTA: Columnas con NaN (Peligro para ML):')
-            for col, n in cols_with_nulls.items():
-                pct = n/len(df)*100
-                print(f'   - {col}: {n} NaN ({pct:.1f}%)')
-        else:
-            print(f'✅ Datos limpios: 0 Valores Nulos')
-        
-        # Check columns with all zeros
-        zero_cols = [c for c in df.select_dtypes(include='number').columns if (df[c] == 0).all()]
-        if zero_cols:
-            print(f'⚠️  Aviso: Columnas con 100% Ceros: {zero_cols} (Revisar si es normal, ej: spread o volumen)')
-        
-        # Check date range
-        if 'time' in df.columns:
-            print(f'📅 Período: {df["time"].iloc[0]} → {df["time"].iloc[-1]}')
-
-    print("\n✅ Auditoría de Integridad Finalizada.")
-
 if __name__ == "__main__":
     run_preprocessing_pipeline()
-    audit_datasets()
+    
+    # 6. Auditoría Final (POO)
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    data_dir = os.path.join(base_dir, "data", "processed")
+    auditor = DataAuditor(data_dir)
+    auditor.audit_all()

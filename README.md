@@ -46,6 +46,8 @@ quant-trading-bot/
  |   |   |-- stationarity.py       # Transformación FFD y Test ADF
  |   |   |-- triple_barrier.py     # Etiquetado de meta-labeling
  |   |   |-- volatility.py         # Cálculo de EGARCH
+ |   |   |-- technical_features.py # Indicadores Técnicos Clásicos
+ |   |   |-- auditor.py            # Auditoría Matemática de Datasets (DataAuditor)
  |   |-- models/
  |   |   |-- anomaly_detector.py   # LSTM Autoencoder y HMMRegimeDetector
  |   |   |-- bilstm_model.py       # BiLSTM Core
