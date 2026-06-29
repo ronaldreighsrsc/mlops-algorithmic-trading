@@ -103,13 +103,14 @@ python src/evaluation/portfolio_backtester.py
 - *Corona al mejor modelo como `campeon_{activo}.json` con sus filtros MLOps listos para Producción.*
 
 > ⏱️ **Duración estimada:** ~1-2 horas (entrena HMM + Autoencoder para cada combinación modelo/banco).
-> 💡 **Nota sobre `fast_mode`:** En este paso se usan dos pases. Primero simula cada activo individualmente entrenando sus escudos MLOps desde cero (`fast_mode=False`) y guardándolos en disco. Luego, junta todos en el simulador global HRP usando los escudos guardados (`fast_mode=True`) para evitar duplicar el tiempo de entrenamiento de la IA.
 
-### 3b. Regenerar Reportes Rápidamente (Modo Fast)
+### 3b. Backtester Rápido y Reportes (`fast_mode`)
+Si solo quieres regenerar los reportes, el JSON de producción o revisar los resultados sin tener que esperar 2 horas de entrenamiento, corre el backtester independiente.
+Por defecto usa `fast_mode=True`, lo que significa que carga los Autoencoders y modelos pre-entrenados desde `results/mlops_monitors/` en segundos:
+
 ```bash
 python src/evaluation/backtester.py
 ```
-*Ejecuta el mismo Torneo pero en **modo rápido (`fast_mode=True`)**. En lugar de re-entrenar los HMM y Autoencoders desde cero, los **carga desde disco** (`results/mlops_monitors/`). Genera el reporte HTML profesional, gráficos de Equity y el JSON de producción en segundos. Requiere haber corrido `portfolio_backtester.py` al menos una vez.*
 
 ### 4. Puesta en Producción (Live Trading)
 ```bash

@@ -123,7 +123,12 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     plt.tight_layout()
     plt.savefig(f"portfolio_backtest_{activo}.png")
     print(f"✅ Gráfico guardado como 'portfolio_backtest_{activo}.png'")
-    plt.show()
+    # plt.show() # Desactivado para no bloquear el script global
+    
+    # Retornar la serie del activo (GRASP: Information Expert)
+    df_asset = pd.DataFrame({'cum_ret': cum_ret_series}, index=exit_times)
+    df_asset = df_asset[~df_asset.index.duplicated(keep='last')]
+    return df_asset['cum_ret']
 
 if __name__ == "__main__":
     # Configura aquí tu cuenta de banco y tu riesgo!
@@ -133,36 +138,16 @@ if __name__ == "__main__":
     activos = ["EURUSD", "SP500", "Oro", "ECH"]
     
     # 1. Simulación Individual (Silos)
+    series_retornos = {}
     for activo_actual in activos:
-        simulate_portfolio(activo=activo_actual, capital_inicial=CAPITAL, riesgo_por_trade=RIESGO_PCT)
+        serie_campeon = simulate_portfolio(activo=activo_actual, capital_inicial=CAPITAL, riesgo_por_trade=RIESGO_PCT)
+        if serie_campeon is not None:
+            series_retornos[activo_actual] = serie_campeon
         
     # 2. Simulación Global con HRP (Machine Learning Multi-Activo)
-    def simulate_global_portfolio(activos, capital_inicial=10000.0):
+    def simulate_global_portfolio(series_retornos, capital_inicial=10000.0):
         print(f"\n💰 INICIANDO GLOBAL PORTFOLIO HRP BACKTESTER 💰")
-        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-        data_dir = os.path.join(base_dir, "data")
-        results_dir = os.path.join(base_dir, "results")
-        modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
-        bancos = ['Precio_Puro', 'Precio_Volumen', 'Tecnicos', 'Macros', 'Globales', 'Hibrido_Precio_Tec_Vol', 'Macro_Vol', 'Kitchen_Sink_Total', 'Total']
         
-        series_retornos = {}
-        
-        for activo in activos:
-            tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=True)
-            campeones_tuple = tester.run_tournament(modelos, bancos)
-            campeones = campeones_tuple[0]
-            if not campeones:
-                continue
-            mejor_modelo = max(campeones.keys(), key=lambda k: campeones[k]['alpha'])
-            data = campeones[mejor_modelo]
-            
-            exit_times = data['exit_times']
-            cum_ret = data['cum_ret_series']
-            
-            df_asset = pd.DataFrame({'cum_ret': cum_ret}, index=exit_times)
-            df_asset = df_asset[~df_asset.index.duplicated(keep='last')]
-            series_retornos[activo] = df_asset['cum_ret']
-            
         if not series_retornos:
             print("No hay datos de campeones para simular el portafolio global.")
             return
@@ -244,4 +229,4 @@ if __name__ == "__main__":
             json.dump(pesos_dict, f, indent=4)
         print("✅ Pesos HRP exportados a 'hrp_weights.json' para Producción.")
 
-    simulate_global_portfolio(activos, capital_inicial=CAPITAL)
+    simulate_global_portfolio(series_retornos=series_retornos, capital_inicial=CAPITAL)
