@@ -136,7 +136,7 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
 if __name__ == "__main__":
     # Configura aquí tu cuenta de banco y tu riesgo!
     CAPITAL = 10000.0       # USD en tu broker
-    RIESGO_PCT = 0.01       # 1% por trade base (se escala a 0.5% o 2% por Kelly)
+    RIESGO_PCT = 0.025       
     
     activos = ["EURUSD", "SP500", "Oro", "ECH"]
     

@@ -245,8 +245,8 @@ class TripleBarrierBacktester:
                     
                 drawdown = (current_equity / peak_equity) - 1.0
                 
-                # Dynamic Kill-Switch basado en Riesgo Base (ej. 1% * 15 = 15% MDD)
-                mdd_threshold = -(self.base_risk * 15.0)
+                # Dynamic Kill-Switch basado en Riesgo Base (ej. 2.5% * 10 = 25% MDD)
+                mdd_threshold = -(self.base_risk * 10.0)
                 
                 if drawdown <= mdd_threshold:
                     is_dead = True

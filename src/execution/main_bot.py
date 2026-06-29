@@ -49,7 +49,7 @@ class TradingBot:
         self.connector = MT5Connector()
         self.engine = ExecutionEngine(self.connector)
         self.risk_manager = RiskManager(
-            risk_per_trade_pct=0.01, # Arriesgar 1% por trade
+            risk_per_trade_pct=0.025,
             k_up=config["k_up"],
             k_down=config["k_down"],
             cusum_threshold=config["cusum_threshold"]
