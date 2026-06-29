@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from evaluation.backtester import TripleBarrierBacktester
 
-def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trade=0.01):
+def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trade=0.01, fast_mode=False):
     print(f"\n💰 INICIANDO PORTFOLIO BACKTESTER PARA {activo} 💰")
     print(f"Capital Inicial: ${capital_inicial:,.2f}")
     print(f"Riesgo Base (Kelly Dinámico): {riesgo_por_trade*100}%")
@@ -16,9 +16,11 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     data_dir = os.path.join(base_dir, "data")
     results_dir = os.path.join(base_dir, "results")
-    tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=False)
+    from main_training import get_bancos_por_activo
+    
+    tester = TripleBarrierBacktester(activo=activo, data_dir=data_dir, results_dir=results_dir, fast_mode=fast_mode)
     modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
-    bancos = ['Precio_Puro', 'Precio_Volumen', 'Tecnicos', 'Macros', 'Globales', 'Hibrido_Precio_Tec_Vol', 'Macro_Vol', 'Kitchen_Sink_Total', 'Total']
+    bancos = list(get_bancos_por_activo(activo).keys())
     
     campeones_tuple = tester.run_tournament(modelos, bancos)
     campeones = campeones_tuple[0]
@@ -140,7 +142,7 @@ if __name__ == "__main__":
     # 1. Simulación Individual (Silos)
     series_retornos = {}
     for activo_actual in activos:
-        serie_campeon = simulate_portfolio(activo=activo_actual, capital_inicial=CAPITAL, riesgo_por_trade=RIESGO_PCT)
+        serie_campeon = simulate_portfolio(activo=activo_actual, capital_inicial=CAPITAL, riesgo_por_trade=RIESGO_PCT, fast_mode=True)
         if serie_campeon is not None:
             series_retornos[activo_actual] = serie_campeon
         

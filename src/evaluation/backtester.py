@@ -678,9 +678,11 @@ def main():
     
     activos = ["EURUSD", "SP500", "Oro", "ECH"]
     modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
-    bancos = ['Precio_Puro', 'Tecnicos', 'Total']
+    
+    from main_training import get_bancos_por_activo
     
     for activo in activos:
+        bancos = list(get_bancos_por_activo(activo).keys())
         backtester = TripleBarrierBacktester(activo, data_dir, results_dir, fast_mode=True)
         campeones, df_backtest = backtester.run_tournament(modelos, bancos)
         if campeones:
