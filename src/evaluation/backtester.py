@@ -330,16 +330,18 @@ class TripleBarrierBacktester:
                 
                 if self.fast_mode:
                     # === MODO RÁPIDO: Cargar modelos MLOps pre-entrenados ===
+                    if not os.path.exists(f"{ae_save_path}.keras"):
+                        # Sin Autoencoder guardado → No competir sin escudo MLOps
+                        continue
                     if macro_cols and os.path.exists(hmm_save_path):
                         from models.anomaly_detector import HMMRegimeDetector
                         hybrid_monitor.hmm_model = HMMRegimeDetector(n_components=3)
                         hybrid_monitor.hmm_model.load(hmm_save_path)
                         print(f"  ⚡ HMM cargado desde disco para {modelo} ({banco})")
-                    if os.path.exists(f"{ae_save_path}.keras"):
-                        from models.anomaly_detector import StrategyLSTMAutoencoder
-                        hybrid_monitor.lstm_model = StrategyLSTMAutoencoder()
-                        hybrid_monitor.lstm_model.load(ae_save_path)
-                        print(f"  ⚡ Autoencoder cargado desde disco para {modelo} ({banco})")
+                    from models.anomaly_detector import StrategyLSTMAutoencoder
+                    hybrid_monitor.lstm_model = StrategyLSTMAutoencoder()
+                    hybrid_monitor.lstm_model.load(ae_save_path)
+                    print(f"  ⚡ Autoencoder cargado desde disco para {modelo} ({banco})")
                 else:
                     # === MODO FULL: Entrenar desde cero y guardar a disco ===
                     if os.path.exists(train_probs_path):
@@ -363,7 +365,8 @@ class TripleBarrierBacktester:
                             hybrid_monitor.lstm_model.fit(X_train)
                             hybrid_monitor.lstm_model.save(ae_save_path)
                     else:
-                        print(f"  ⚠️ No se encontró train_probs para {modelo} (Banco: {banco}). El Autoencoder no se activará para este banco.")
+                        print(f"  ⛔ Sin train_probs para {modelo} (Banco: {banco}). Saltando (no compite sin escudo MLOps).")
+                        continue
                     
                 # 2. Fase de Producción / Evaluación Out-Of-Sample
                 df_backtest = df_processed.iloc[-n_test:].copy()
