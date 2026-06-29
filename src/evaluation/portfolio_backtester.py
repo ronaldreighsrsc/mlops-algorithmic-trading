@@ -7,7 +7,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from evaluation.backtester import TripleBarrierBacktester
 
-def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trade=0.01, fast_mode=False):
+def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trade=0.01, fast_mode=True):
     print(f"\n💰 INICIANDO PORTFOLIO BACKTESTER PARA {activo} 💰")
     print(f"Capital Inicial: ${capital_inicial:,.2f}")
     print(f"Riesgo Base (Kelly Dinámico): {riesgo_por_trade*100}%")
