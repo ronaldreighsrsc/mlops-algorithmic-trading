@@ -103,6 +103,7 @@ python src/evaluation/portfolio_backtester.py
 - *Corona al mejor modelo como `campeon_{activo}.json` con sus filtros MLOps listos para Producción.*
 
 > ⏱️ **Duración estimada:** ~1-2 horas (entrena HMM + Autoencoder para cada combinación modelo/banco).
+> 💡 **Nota sobre `fast_mode`:** En este paso se usan dos pases. Primero simula cada activo individualmente entrenando sus escudos MLOps desde cero (`fast_mode=False`) y guardándolos en disco. Luego, junta todos en el simulador global HRP usando los escudos guardados (`fast_mode=True`) para evitar duplicar el tiempo de entrenamiento de la IA.
 
 ### 3b. Regenerar Reportes Rápidamente (Modo Fast)
 ```bash
