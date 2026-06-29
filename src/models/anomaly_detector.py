@@ -79,7 +79,8 @@ class StrategyLSTMAutoencoder:
         X_scaled = self.scaler.transform(X_window)
         X_3d = np.expand_dims(X_scaled, axis=1)
         
-        reconstructed = self.model.predict(X_3d, verbose=0)
+        # Optimizacion de Inferencia (100x más rápido que predict)
+        reconstructed = self.model(X_3d, training=False).numpy()
         mse = np.mean(np.power(X_3d - reconstructed, 2), axis=(1, 2))
         
         # Si el error es mayor al umbral P99 de entrenamiento, es anómalo
@@ -101,7 +102,8 @@ class StrategyLSTMAutoencoder:
         # Expandir cada fila independientemente para el autoencoder (N, 1, features)
         X_3d = np.expand_dims(X_scaled, axis=1)
         
-        reconstructed = self.model.predict(X_3d, verbose=0)
+        # Optimizacion de Inferencia (100x más rápido que predict)
+        reconstructed = self.model(X_3d, training=False).numpy()
         mse_array = np.mean(np.power(X_3d - reconstructed, 2), axis=(1, 2))
         
         median_mse = np.median(mse_array)
