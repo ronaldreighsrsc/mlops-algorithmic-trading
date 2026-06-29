@@ -150,6 +150,9 @@ if __name__ == "__main__":
     def simulate_global_portfolio(series_retornos, capital_inicial=10000.0):
         print(f"\n💰 INICIANDO GLOBAL PORTFOLIO HRP BACKTESTER 💰")
         
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        results_dir = os.path.join(base_dir, "results")
+        
         if not series_retornos:
             print("No hay datos de campeones para simular el portafolio global.")
             return
