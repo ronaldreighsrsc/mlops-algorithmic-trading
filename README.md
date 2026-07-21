@@ -9,7 +9,7 @@ El sistema emplea el marco teórico avanzado de **Marcos López de Prado** (Adva
 El bot está dividido en 5 pilares fundamentales:
 
 1. **Fractional Differencing (FFD)**: Estacionariedad preservando la memoria. Transforma las series de precios conservando el máximo de información (Test de Dickey-Fuller).
-2. **Triple Barrier Method**: Etiquetado de datos con meta-labeling. Define Take Profit y Stop Loss dinámicos basados en la volatilidad condicional diaria.
+2. **Triple Barrier Method**: Etiquetado de datos con meta-labeling. Define 3 barreras dinámicas: Take Profit y Stop Loss basados en la volatilidad condicional diaria (EGARCH) + Barrera Vertical (`Max Hold` de 10 días) que liquida a mercado la posición si no alcanza los objetivos en tiempo.
 3. **Volatilidad Condicional (EGARCH)**: Ajusta el ancho de las barreras de TP/SL diariamente según la volatilidad proyectada del mercado.
 4. **Machine Learning Predictivo**: Redes Neuronales (LSTM, BiLSTM), Gradient Boosting (XGBoost) e Híbridos (ARIMA-LSTM) entrenados con Validación Cruzada Purgada y Embargo (Purged K-Fold) + Walk-Forward Optimization para prevenir fuga de datos temporales.
 5. **Gestión de Riesgo (Kelly Dinámico)**: Escala el lote de inversión dinámicamente (0.5x, 1.0x, 2.0x) según la fuerza de la probabilidad estadística predicha.
@@ -119,7 +119,7 @@ python src/evaluation/backtester.py
 ```bash
 python src/execution/main_bot.py
 ```
-*El ciclo de vida final. El bot carga al campeón desde su `.json` y extrae los pesos MLOps (`.keras`, `.pkl`). Ejecuta su **Shadow Journal** evaluando los últimos 300 días para auto-diagnosticar su salud (Cuarentena / Concept Drift). Si el diagnóstico es exitoso (`✅ Shadow Journal OK`), procesa la última vela de hoy y dispara la orden de compra/venta a MT5 (o alerta Telegram para ECH) usando dimensionamiento Kelly.*
+*El ciclo de vida final. El bot carga al campeón desde su `.json` y extrae los pesos MLOps (`.keras`, `.pkl`). Ejecuta su **Shadow Journal** evaluando los últimos 300 días para auto-diagnosticar su salud (Cuarentena / Concept Drift). Si el diagnóstico es exitoso (`✅ Shadow Journal OK`), procesa la última vela de hoy, gestiona la Barrera Vertical (`Max Hold`), dispara la orden de compra/venta a MT5 y envía notificaciones por Telegram con la calculadora dual (Lotes MT5 y Trading Power exacto para ejecución manual en Quantfury).*
 
 ### 5. Automatización en Servidor AWS / VPS (Recomendado)
 Para que el bot corra 24/7 y sobreviva a reinicios automáticos de AWS (parches de Windows), **NO** se debe usar un arranque en modo servicio ("Session 0"), ya que MetaTrader 5 requiere entorno gráfico (GUI) para funcionar sin crashear. 
