@@ -280,10 +280,17 @@ class TradingBot:
 
         # 2. (Legacy CUSUM eliminado — reemplazado por Shadow Journal + HybridRiskMonitor)
 
-        # 3. Verificar si ya tenemos un trade corriendo
+        # 3. Verificar si ya tenemos un trade corriendo y gestionar la Barrera Vertical (Max Hold)
         if self.engine.has_open_positions(self.symbol):
-            logging.info("Ya existe un trade abierto. Ignorando nueva señal (estrategia single-position).")
+            max_hold = getattr(self.risk_manager, 'max_hold', 10)
+            closed_by_max_hold = self.engine.check_and_close_vertical_barrier(self.symbol, self.timeframe, max_hold)
+            if closed_by_max_hold:
+                logging.info(f"[{self.symbol}] ⏳ Barrera Vertical alcanzada ({max_hold} velas). Posición cerrada exitosamente.")
+                self.notifier.alert_max_hold_exit(self.symbol, max_hold)
+            else:
+                logging.info("Ya existe un trade abierto. Ignorando nueva señal (estrategia single-position).")
             return
+
 
         # 4. Descargar y preprocesar datos (necesitamos la matriz X 3D para el modelo)
         df_raw = self.fetch_live_data()

@@ -125,3 +125,13 @@ class TelegramNotifier:
         )
         self.send_message(msg)
 
+    def alert_max_hold_exit(self, symbol: str, max_hold: int):
+        msg = (
+            f"⏳ *CIERRE POR BARRERA VERTICAL (MAX HOLD)* ⏳\n"
+            f"Activo: {symbol}\n"
+            f"La posición abierta en *{symbol}* ha cumplido su límite de tiempo de `{max_hold}` días/velas sin alcanzar el Take Profit ni el Stop Loss.\n"
+            f"✂️ *Acción:* Posición cerrada automáticamente a mercado para liberar capital y evitar costo de oportunidad."
+        )
+        self.send_message(msg)
+
+
