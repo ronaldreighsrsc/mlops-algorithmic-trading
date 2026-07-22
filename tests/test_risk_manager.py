@@ -9,15 +9,28 @@ import math
 class TestTripleBarrierLevels:
     """Tests para calculate_triple_barrier_levels()"""
 
-    def test_tp_above_price_sl_below(self, risk_manager_default):
-        """TP siempre debe estar ARRIBA del precio y SL siempre ABAJO."""
+    def test_long_tp_above_price_sl_below(self, risk_manager_default):
+        """LONG: TP siempre debe estar ARRIBA del precio y SL siempre ABAJO."""
         price = 1.1000
         vol = 0.5  # 0.5% de volatilidad diaria
         
         tp, sl = risk_manager_default.calculate_triple_barrier_levels(price, vol)
         
-        assert tp > price, f"Take Profit ({tp}) debería estar por encima del precio ({price})"
-        assert sl < price, f"Stop Loss ({sl}) debería estar por debajo del precio ({price})"
+        assert tp > price, f"[LONG] Take Profit ({tp}) debería estar por encima del precio ({price})"
+        assert sl < price, f"[LONG] Stop Loss ({sl}) debería estar por debajo del precio ({price})"
+
+    def test_short_tp_below_price_sl_above(self, risk_manager_default):
+        """SHORT: TP debe estar ABAJO del precio y SL ARRIBA (invertido vs Long)."""
+        price = 1.1000
+        vol = 0.5
+        vol_decimal = vol / 100.0
+        
+        # Replica la lógica inline de main_bot.py para shorts
+        tp = price * (1 - risk_manager_default.k_up * vol_decimal)
+        sl = price * (1 + risk_manager_default.k_down * vol_decimal)
+        
+        assert tp < price, f"[SHORT] Take Profit ({tp}) debería estar por debajo del precio ({price})"
+        assert sl > price, f"[SHORT] Stop Loss ({sl}) debería estar por encima del precio ({price})"
 
     def test_zero_volatility_no_crash(self, risk_manager_default):
         """Si la volatilidad es 0, las barreras deben ser iguales al precio (sin crash)."""
