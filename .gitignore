@@ -39,3 +39,7 @@ cache/
 # Gráficos de Backtest (contienen resultados financieros sensibles)
 portfolio_backtest_*.png
 global_portfolio_hrp.png
+
+# Pytest
+.pytest_cache/
+
