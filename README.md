@@ -121,6 +121,15 @@ python src/execution/main_bot.py
 ```
 *El ciclo de vida final. El bot carga al campeón desde su `.json` y extrae los pesos MLOps (`.keras`, `.pkl`). Ejecuta su **Shadow Journal** evaluando los últimos 300 días para auto-diagnosticar su salud (Cuarentena / Concept Drift). Si el diagnóstico es exitoso (`✅ Shadow Journal OK`), procesa la última vela de hoy, gestiona la Barrera Vertical (`Max Hold`), dispara la orden de compra/venta a MT5 y envía notificaciones por Telegram con la calculadora dual (Lotes MT5 y Trading Power exacto para ejecución manual en Quantfury).*
 
+### 4b. Empaquetar para AWS (Generar `bot_production.zip`)
+```bash
+python export_to_aws.py
+```
+*Empaqueta todo lo necesario para producción en un solo archivo ZIP: código fuente, modelos campeones (`.pkl`), filtros MLOps (`.keras`, HMM), configuración (`.json`, `.env`) y el `start_bot.bat`. Excluye automáticamente archivos pesados innecesarios (`.npy`, `.png`, `.html`) y estados locales de cuarentena (`.lock`) para que el bot arranque prístino en AWS.*
+
+> [!TIP]
+> Corre este comando cada vez que hagas cambios en el código o re-entrenes los modelos. Luego sube el `bot_production.zip` a tu instancia EC2, descomprímelo y reinicia el bot.
+
 ### 5. Automatización en Servidor AWS / VPS (Recomendado)
 Para que el bot corra 24/7 y sobreviva a reinicios automáticos de AWS (parches de Windows), **NO** se debe usar un arranque en modo servicio ("Session 0"), ya que MetaTrader 5 requiere entorno gráfico (GUI) para funcionar sin crashear. 
 
@@ -140,6 +149,25 @@ schtasks /create /tn "QuantBot_Trading" /tr "C:\Users\Administrator\Desktop\quan
 ```
 > [!IMPORTANT]
 > Observa el parámetro `/sc onlogon` (Al iniciar sesión). Usar `/sc onstart` (Al encender) ejecutará el bot oculto en el fondo, impidiéndote ver los gráficos de MT5 e inestabilizando la conexión Python-MT5.
+
+## 🧪 Tests Unitarios (MLOps)
+
+El proyecto incluye **26 pruebas unitarias** con `pytest` que validan las matemáticas críticas del bot para prevenir bugs silenciosos que podrían quemar la cuenta:
+
+```bash
+python -m pytest tests/ -v
+```
+
+| Módulo | Tests | Qué protege |
+|--------|-------|-------------|
+| `test_risk_manager.py` | 6 | Position Sizing, Kelly, barreras TP/SL |
+| `test_triple_barrier.py` | 6 | Etiquetado correcto (bull/crash/flat) |
+| `test_ffd.py` | 6 | Estacionariedad, memoria, columnas protegidas |
+| `test_egarch.py` | 4 | Volatilidad positiva, cap 5%, cadena de fallback |
+| `test_technical_features.py` | 4 | RSI [0,100], ATR > 0, fail-fast |
+
+> [!TIP]
+> Corre `pytest` después de cualquier cambio en los módulos de preprocesamiento o riesgo para asegurar que no introdujiste un bug silencioso.
 
 ## ⚙️ Configuración del Entorno
 
