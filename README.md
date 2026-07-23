@@ -126,7 +126,24 @@ python src/execution/main_bot.py
 ```bash
 python export_to_aws.py
 ```
-*Empaqueta todo lo necesario para producción en un solo archivo ZIP: código fuente, modelos campeones (`.pkl`), filtros MLOps (`.keras`, HMM), configuración (`.json`, `.env`) y el `start_bot.bat`. Excluye automáticamente archivos pesados innecesarios (`.npy`, `.png`, `.html`) y estados locales de cuarentena (`.lock`) para que el bot arranque prístino en AWS.*
+*Empaqueta de forma inteligente solo los modelos campeones activos, sus monitores MLOps (`.keras`, `.pkl`), la matriz `hrp_weights.json`, el código fuente `src/` y las dependencias.*
+
+---
+
+## 📅 Calendario de Mantenimiento MLOps (Cuándo ejecutar qué script)
+
+Para no confundir qué script debe correr con qué frecuencia ni qué parámetro usar, sigue este cuadro operativo:
+
+| Fase MLOps | Frecuencia Recomendada | Script a Ejecutar | Parámetro Clave | Qué hace / Qué genera |
+|---|---|---|---|---|
+| **1. Refresco de Datos** | Mensual | `python src/data_extractor.py`<br>`python src/main_preprocessing.py` | N/A | Descarga velas recientes y actualiza `data/processed/*.csv` |
+| **2. Re-entrenamiento de Modelos IA** | 1 o 2 veces al año | `python src/main_training.py` | N/A | Re-entrena XGBoost, BiLSTM, ARIMA-LSTM sobre nuevos datos. Genera `.pkl` y `.npy`. |
+| **3. Entrenamiento Monitores MLOps** | 1 o 2 veces al año *(tras Paso 2)* | `python src/evaluation/portfolio_backtester.py` | `fast_mode=False`<br>*(~1-2 horas)* | Entrena los detectores HMM (Markov) y LSTM Autoencoders desde cero en `results/mlops_monitors/`. |
+| **4. Rebalanceo de Pesos HRP** | Mensual (ej. el 1º de cada mes) | `python src/evaluation/portfolio_backtester.py` | `fast_mode=True`<br>*(~2 minutos)* | Carga monitores pre-entrenados, recalcula la matriz HRP sobre datos recientes y actualiza `hrp_weights.json`. |
+| **5. Empaquetado AWS** | Tras cada Paso 2 o 4 | `python export_to_aws.py` | N/A | Genera el archivo `bot_production.zip` listo para desplegar. |
+| **6. Ejecución 24/7** | Continuo en AWS | `python src/execution/main_bot.py` | N/A | Corre en vivo en el servidor, descarga velas del día, pasa por el Shadow Journal y opera. |
+
+---
 
 > [!TIP]
 > Corre este comando cada vez que hagas cambios en el código o re-entrenes los modelos. Luego sube el `bot_production.zip` a tu instancia EC2, descomprímelo y reinicia el bot.
