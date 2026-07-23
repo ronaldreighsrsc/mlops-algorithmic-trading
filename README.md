@@ -116,6 +116,12 @@ python src/evaluation/backtester.py
 ```
 *Si solo quieres regenerar los reportes HTML, los gráficos de curva de equidad o exportar la configuración del campeón sin pasar por la simulación de billetera en USD, corre el backtester independiente (`fast_mode=True` por defecto).*
 
+### 3c. Auditoría de Robustez y PBO (`cpcv_auditor.py`)
+```bash
+python src/evaluation/cpcv_auditor.py
+```
+*Certifica matemáticamente que la estrategia del campeón NO fue fruto del sobreajuste (Overfitting) ni de la suerte. Aplica **Combinatorial Purged Cross-Validation (CPCV)** dividiendo la historia en combinaciones de caminos cruzados ($\binom{6}{2} = 15$ caminos) y calcula la **Probability of Backtest Overfitting (PBO)**. Genera el gráfico `cpcv_sharpe_distribution_{activo}.png` en `results/` y registra la distribución en MLflow.*
+
 
 ### 4. Puesta en Producción (Live Trading)
 ```bash
@@ -140,9 +146,11 @@ Para no confundir qué script debe correr con qué frecuencia ni qué parámetro
 | **1. Refresco de Datos** | Mensual | `python src/data_extractor.py`<br>`python src/main_preprocessing.py` | N/A | Descarga velas recientes y actualiza `data/processed/*.csv` |
 | **2. Re-entrenamiento de Modelos IA** | 1 o 2 veces al año | `python src/main_training.py` | N/A | Re-entrena XGBoost, BiLSTM, ARIMA-LSTM sobre nuevos datos. Genera `.pkl` y `.npy`. |
 | **3. Entrenamiento Monitores MLOps** | 1 o 2 veces al año *(tras Paso 2)* | `python src/evaluation/portfolio_backtester.py` | `fast_mode=False`<br>*(~1-2 horas)* | Entrena los detectores HMM (Markov) y LSTM Autoencoders desde cero en `results/mlops_monitors/`. |
-| **4. Rebalanceo de Pesos HRP** | Mensual (ej. el 1º de cada mes) | `python src/evaluation/portfolio_backtester.py` | `fast_mode=True`<br>*(~2 minutos)* | Carga monitores pre-entrenados, recalcula la matriz HRP sobre datos recientes y actualiza `hrp_weights.json`. |
-| **5. Empaquetado AWS** | Tras cada Paso 2 o 4 | `python export_to_aws.py` | N/A | Genera el archivo `bot_production.zip` listo para desplegar. |
-| **6. Ejecución 24/7** | Continuo en AWS | `python src/execution/main_bot.py` | N/A | Corre en vivo en el servidor, descarga velas del día, pasa por el Shadow Journal y opera. |
+| **4. Auditoría PBO & CPCV** | Trimestral / Tras Paso 2 | `python src/evaluation/cpcv_auditor.py` | N/A | Evalúa $\binom{6}{2}=15$ caminos cruzados y certifica PBO < 5%. |
+| **5. Rebalanceo de Pesos HRP** | Mensual (ej. el 1º de cada mes) | `python src/evaluation/portfolio_backtester.py` | `fast_mode=True`<br>*(~2 minutos)* | Carga monitores pre-entrenados, recalcula la matriz HRP sobre datos recientes y actualiza `hrp_weights.json`. |
+| **6. Empaquetado AWS** | Tras cada Paso 2 o 5 | `python export_to_aws.py` | N/A | Genera el archivo `bot_production.zip` listo para desplegar. |
+| **7. Ejecución 24/7** | Continuo en AWS | `python src/execution/main_bot.py` | N/A | Corre en vivo en el servidor, descarga velas del día, pasa por el Shadow Journal y opera. |
+
 
 ---
 
