@@ -43,3 +43,10 @@ global_portfolio_hrp.png
 # Pytest
 .pytest_cache/
 
+# MLflow Tracking y Artifacts
+mlruns/
+mlartifacts/
+mlflow.db
+*.db
+
+

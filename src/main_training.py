@@ -10,6 +10,8 @@ sys.stderr.reconfigure(encoding='utf-8', line_buffering=True)
 os.environ['PYTHONUNBUFFERED'] = '1'
 from sklearn.metrics import accuracy_score
 import tensorflow as tf
+import mlflow
+import mlflow.sklearn
 
 from models.random_forest import RandomForestTrainer
 from models.xgb_model import XGBoostTrainer
@@ -20,6 +22,7 @@ from models.lstm_rf import HybridLSTMRFTrainer
 
 warnings.filterwarnings("ignore")
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+
 
 # ==============================================================================
 # CONFIGURACIÓN DEL EXPERIMENTO
@@ -94,6 +97,11 @@ def train_for_asset(activo: str):
     os.makedirs(models_out_dir, exist_ok=True)
     
     resultados_globales = []
+
+    try:
+        mlflow.set_experiment(f"Training_{activo}")
+    except Exception as e:
+        print(f"⚠️ No se pudo configurar experimento MLflow: {e}")
 
     # 2. Iteración de Modelos
     for nombre_modelo in MODELOS_A_CORRER:
@@ -221,6 +229,28 @@ def train_for_asset(activo: str):
                 npy_train_path = os.path.join(results_dir, f"train_probs_{nombre_modelo.lower()}_{nombre_banco.lower()}_{activo}.npy")
                 np.save(npy_train_path, np.array(train_probs))
             
+            # --- MLflow Logging ---
+            try:
+                run_name = f"{nombre_modelo}_{nombre_banco}_{activo}"
+                with mlflow.start_run(run_name=run_name, nested=True):
+                    mlflow.log_params({
+                        "activo": activo,
+                        "modelo": nombre_modelo,
+                        "banco": nombre_banco,
+                        "target_col": target_col,
+                        "num_features": len(valid_features),
+                        "features": ",".join(valid_features) if valid_features else "None",
+                        "best_params": str(best_params)
+                    })
+                    if 'pred_probs' in locals() and len(pred_probs) > 0:
+                        mlflow.log_metric("oos_predictions_count", len(pred_probs))
+                    if os.path.exists(save_path):
+                        mlflow.log_artifact(save_path, artifact_path="saved_models")
+                    if os.path.exists(npy_path):
+                        mlflow.log_artifact(npy_path, artifact_path="probs")
+            except Exception as ml_err:
+                print(f"⚠️ MLflow logging skipped: {ml_err}")
+
             resultados_globales.append({
                 "Activo": activo,
                 "Modelo": nombre_modelo,
@@ -232,6 +262,7 @@ def train_for_asset(activo: str):
             import gc
             tf.keras.backend.clear_session()
             gc.collect()
+
 
     # 4. Resumen Global
     if resultados_globales:

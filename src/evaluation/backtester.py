@@ -427,6 +427,44 @@ class TripleBarrierBacktester:
                         )
                         metrics.update(mc_dsr_metrics)
                         
+                        # --- MLflow Candidate Tracking ---
+                        try:
+                            import mlflow
+                            mlflow.set_experiment(f"Tournament_{self.activo}")
+                            with mlflow.start_run(run_name=f"{modelo}_{banco}_{umbral:.0%}", nested=True):
+                                mlflow.log_params({
+                                    "activo": self.activo,
+                                    "modelo": modelo,
+                                    "banco": banco,
+                                    "umbral": umbral,
+                                    "is_dead": str(is_dead)
+                                })
+                                raw_cand_metrics = {
+                                    "alpha": alpha,
+                                    "retorno_estrategia": retorno_estrategia,
+                                    "retorno_mercado": retorno_mercado_total,
+                                    "cagr_est": cagr_est,
+                                    "cagr_mkt": cagr_mkt,
+                                    "win_rate": win_rate,
+                                    "n_trades": float(n_trades),
+                                    "sharpe": metrics.get("Sharpe", 0.0),
+                                    "sortino": metrics.get("Sortino", 0.0),
+                                    "calmar": metrics.get("Calmar", 0.0),
+                                    "max_dd": metrics.get("MaxDD", 0.0),
+                                    "dsr": metrics.get("DSR", 0.0)
+                                }
+                                clean_cand_metrics = {}
+                                for k, v in raw_cand_metrics.items():
+                                    try:
+                                        val = float(v)
+                                        if not np.isnan(val) and not np.isinf(val):
+                                            clean_cand_metrics[k] = val
+                                    except (ValueError, TypeError):
+                                        pass
+                                mlflow.log_metrics(clean_cand_metrics)
+                        except Exception:
+                            pass
+
                         if alpha > mejor_alpha:
                             mejor_alpha = alpha
                             campeon_actual = {
@@ -450,6 +488,7 @@ class TripleBarrierBacktester:
                 print(f"  Campeon {modelo.upper():>15}: {campeon_actual['banco']:<15} | Estado: {status_str} | Alpha: {campeon_actual['alpha']:>8.2%} | Win: {campeon_actual['win_rate']:>6.1%} | Trades: {campeon_actual['trades']}")
 
         return campeones, df_backtest if 'df_backtest' in locals() else None
+
 
     def generate_html_report(self, campeones):
         if not campeones:
@@ -673,6 +712,30 @@ class TripleBarrierBacktester:
                 hybrid_monitor.hmm_model.save(os.path.join(self.results_dir, f"campeon_{self.activo}_hmm.pkl"))
             
         print(f"  💾 Configuración de Producción exportada: {json_path} (Alpha: {data['alpha']:.2%})")
+
+        # MLflow Model Registry Champion Export Logging
+        try:
+            import mlflow
+            mlflow.set_experiment("Model_Registry_Champions")
+            with mlflow.start_run(run_name=f"Champion_Export_{self.activo}_{mejor_modelo}"):
+                mlflow.log_params(config)
+                mlflow.log_metrics({
+                    "champion_alpha": float(data.get('alpha', 0.0)),
+                    "champion_win_rate": float(data.get('win_rate', 0.0)),
+                    "champion_cagr": float(data.get('cagr_est', 0.0))
+                })
+                if os.path.exists(json_path):
+                    mlflow.log_artifact(json_path, artifact_path="champion_config")
+                
+                html_path = os.path.join(self.results_dir, f"backtest_report_{self.activo}.html")
+                if os.path.exists(html_path):
+                    mlflow.log_artifact(html_path, artifact_path="reports")
+                equity_path = os.path.join(self.results_dir, f"equity_curve_{self.activo}.png")
+                if os.path.exists(equity_path):
+                    mlflow.log_artifact(equity_path, artifact_path="charts")
+        except Exception:
+            pass
+
 
 
 def main():

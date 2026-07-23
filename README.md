@@ -35,10 +35,11 @@ La estadística del mercado envejece. El sistema calcula constantemente la Media
 ### 4. Shadow Journal (Diario Sin Estado en Producción)
 Para alimentar los detectores de MLOps en el día a día sin depender de bases de datos o archivos `.csv` corruptibles, el bot en vivo utiliza una arquitectura **Stateless**. Cada mañana descarga los últimos 300 días de historial, predice las probabilidades "al vuelo" y simula internamente las operaciones recientes usando el `TripleBarrierBacktester`. El resultado de esta simulación "sombra" le permite saber instantáneamente si está en racha perdedora y auto-bloquearse (activar Cuarentena) antes de lanzar la orden del día.
 
-### 5. Hierarchical Risk Parity (HRP)
-Implementación nativa del algoritmo de asignación de capital de Marcos López de Prado. En lugar de utilizar la inestable optimización de Markowitz, el sistema agrupa los activos según su correlación histórica mediante *Clustering Jerárquico*. El simulador global calcula los pesos ideales, y el bot en Producción lee esta matriz resultante (`hrp_weights.json`), reduciendo dinámicamente el presupuesto (lotes) de aquellos bots que estén altamente correlacionados entre sí para maximizar la diversificación real.
+### 6. MLflow Experiment Tracking & Model Registry
+Seguimiento automático de experimentos MLOps. Registra hiperparámetros, métricas estadísticas y financieras (Sharpe, Alpha, Win Rate, ROI), gráficos de equidad y artefactos de modelos. Permite comparar ejecuciones históricas y versionar campeones mediante una interfaz web interactiva accesible vía `mlflow ui`.
 
 ---
+
 
 ## 📁 Estructura del Proyecto
 
@@ -93,27 +94,27 @@ python src/main_training.py
 ```
 *El script más pesado. Ejecútalo 1 o 2 veces al año. Pone a competir a decenas de arquitecturas (XGBoost, LSTM, BiLSTM, ARIMA-LSTM, LSTM-RF) con diferentes bancos de datos. Realiza Grid Search, Purged K-Fold y genera simulaciones de Walk-Forward. Emite archivos `.npy` con predicciones puras y `.pkl` con modelos entrenados en `results/`.*
 
-### 3. Simulación Financiera Completa (El Script Pesado)
+### 3. Simulación Financiera y Entrenamiento MLOps (`portfolio_backtester.py`)
 ```bash
 python src/evaluation/portfolio_backtester.py
 ```
-*Este es el corazón analítico del sistema. Ejecuta el Torneo Financiero completo:*
-- *Lee las predicciones `.npy` de los obreros y **entrena a los Gerentes de Riesgo (HMM y LSTM Autoencoder)** sobre los datos In-Sample.*
-- *Guarda todos los modelos MLOps entrenados en `results/mlops_monitors/` para reutilización rápida.*
-- *Aplica las reglas de **Cuarentena (60 días)** y **Muerte por MDD (15%)** al Out-of-Sample.*
-- *Simula el capital real en USD con **Kelly Dinámico** y genera gráficos de rendimiento.*
-- *Ejecuta la optimización **HRP (Hierarchical Risk Parity)** multi-activo y exporta los pesos a `hrp_weights.json`.*
-- *Corona al mejor modelo como `campeon_{activo}.json` con sus filtros MLOps listos para Producción.*
+*Este es el corazón analítico del sistema. Ejecuta el Torneo Financiero completo con **Kelly Dinámico** y **HRP**:*
 
-> ⏱️ **Duración estimada:** ~1-2 horas (entrena HMM + Autoencoder para cada combinación modelo/banco).
+#### 🔄 Modos de Ejecución (`fast_mode`):
+- **Re-entrenamiento MLOps Anual (`fast_mode=False`):** (~1-2 horas). Entrena los modelos de detección de anomalías (HMM y LSTM Autoencoder) desde cero para cada combinación de activo/modelo/banco sobre los datos In-Sample. Se ejecuta **1 o 2 veces al año** y guarda los monitores entrenados en `results/mlops_monitors/`.
+- **Evaluación Rápida (`fast_mode=True`):** (~2 minutos - **Modo por defecto**). Carga los Autoencoders y HMMs pre-entrenados desde `results/mlops_monitors/` en segundos para simular el capital en USD, calcular el **HRP** y generar los archivos de campeones.
 
-### 3b. Backtester Rápido y Reportes (`fast_mode`)
-Si solo quieres regenerar los reportes, el JSON de producción o revisar los resultados sin tener que esperar 2 horas de entrenamiento, corre el backtester independiente.
-Por defecto usa `fast_mode=True`, lo que significa que carga los Autoencoders y modelos pre-entrenados desde `results/mlops_monitors/` en segundos:
+> 💡 **Orden de Ejecución Recomendado:**
+> 1. `main_training.py` (Genera predicciones `.npy` de los modelos base).
+> 2. `portfolio_backtester.py` con `fast_mode=False` (Entrena y guarda los monitores MLOps).
+> 3. `portfolio_backtester.py` con `fast_mode=True` o `backtester.py` (Evaluación diaria/semanal rápida).
 
+### 3b. Backtester Rápido Independiente (`backtester.py`)
 ```bash
 python src/evaluation/backtester.py
 ```
+*Si solo quieres regenerar los reportes HTML, los gráficos de curva de equidad o exportar la configuración del campeón sin pasar por la simulación de billetera en USD, corre el backtester independiente (`fast_mode=True` por defecto).*
+
 
 ### 4. Puesta en Producción (Live Trading)
 ```bash
@@ -168,6 +169,19 @@ python -m pytest tests/ -v
 
 > [!TIP]
 > Corre `pytest` después de cualquier cambio en los módulos de preprocesamiento o riesgo para asegurar que no introdujiste un bug silencioso.
+
+## 📊 MLflow Dashboard (Experiment Tracking & Model Registry)
+
+El sistema integra **MLflow** para registrar automáticamente cada experimento de entrenamiento, torneo de backtest y simulación financiera de portafolio.
+
+### Iniciar la Interfaz Web Local
+```bash
+mlflow ui
+```
+Abre tu navegador en `http://127.0.0.1:5000` para visualizar:
+- **Training Experiments:** Hiperparámetros, cantidad de predicciones OOS y artefactos `.pkl` / `.keras` por cada combinación modelo/banco.
+- **Tournament Runs:** Alpha, Win Rate, Sharpe, Sortino, Calmar, Max Drawdown y Deflated Sharpe Ratio (DSR) de cada candidato evaluado.
+- **Portfolio Evaluation:** ROI Total, ROI Anualizado, Capital Final, gráficos de equidad y configuración del Campeón exportado para producción.
 
 ## ⚙️ Configuración del Entorno
 

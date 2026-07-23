@@ -124,14 +124,75 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     plt.grid(True, linestyle=':', alpha=0.6)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(f"portfolio_backtest_{activo}.png")
-    print(f"✅ Gráfico guardado como 'portfolio_backtest_{activo}.png'")
+    chart_path = f"portfolio_backtest_{activo}.png"
+    plt.savefig(chart_path)
+    print(f"✅ Gráfico guardado como '{chart_path}'")
     # plt.show() # Desactivado para no bloquear el script global
     
+    # 6. MLflow Tracking de Métricas Financieras
+    try:
+        import mlflow
+        mlflow.set_experiment("Portfolio_Evaluation")
+        with mlflow.start_run(run_name=f"Champion_{activo}_{mejor_modelo}"):
+            mlflow.log_params({
+                "activo": activo,
+                "campeon_modelo": mejor_modelo,
+                "banco": str(data.get("banco", "Desconocido")),
+                "umbral": umbral_base,
+                "capital_inicial": capital_inicial,
+                "riesgo_por_trade": riesgo_por_trade,
+                "is_dead": str(data.get("is_dead", False))
+            })
+            
+            m_dict = data.get("metrics", {})
+            raw_metrics = {
+                "capital_final": capital_actual,
+                "roi_total": roi_total,
+                "roi_anualizado": roi_anualizado if dias_totales > 0 else 0.0,
+                "alpha_neto": data.get("alpha", 0.0),
+                "ret_est": data.get("ret_est", 0.0),
+                "ret_mkt": data.get("ret_mkt", 0.0),
+                "cagr_est": data.get("cagr_est", 0.0),
+                "cagr_mkt": data.get("cagr_mkt", 0.0),
+                "win_rate": data.get("win_rate", 0.0),
+                "trades_count": float(data.get("trades", 0)),
+                "avg_duration_days": data.get("avg_duration", 0.0),
+                "sharpe_ratio": m_dict.get("Sharpe", 0.0),
+                "sortino_ratio": m_dict.get("Sortino", 0.0),
+                "calmar_ratio": m_dict.get("Calmar", 0.0),
+                "profit_factor": m_dict.get("ProfitFactor", 0.0),
+                "max_drawdown": m_dict.get("MaxDD", 0.0),
+                "deflated_sharpe_ratio": m_dict.get("DSR", 0.0),
+                "probabilistic_sharpe_ratio": m_dict.get("PSR", 0.0),
+                "montecarlo_mdd_p95": m_dict.get("MonteCarlo_MDD_P95", 0.0),
+                "cvar_95": m_dict.get("CVaR_95", 0.0)
+            }
+            clean_metrics = {}
+            for k, v in raw_metrics.items():
+                try:
+                    val = float(v)
+                    if not np.isnan(val) and not np.isinf(val):
+                        clean_metrics[k] = val
+                except (ValueError, TypeError):
+                    pass
+                    
+            mlflow.log_metrics(clean_metrics)
+            
+            if os.path.exists(chart_path):
+                mlflow.log_artifact(chart_path, artifact_path="charts")
+            
+            campeon_json = os.path.join(results_dir, f"campeon_{activo}.json")
+            if os.path.exists(campeon_json):
+                mlflow.log_artifact(campeon_json, artifact_path="champion_config")
+    except Exception as ml_err:
+        print(f"⚠️ MLflow portfolio logging skipped: {ml_err}")
+
+
     # Retornar la serie del activo (GRASP: Information Expert)
     df_asset = pd.DataFrame({'cum_ret': cum_ret_series}, index=exit_times)
     df_asset = df_asset[~df_asset.index.duplicated(keep='last')]
     return df_asset['cum_ret']
+
 
 if __name__ == "__main__":
     # Configura aquí tu cuenta de banco y tu riesgo!
