@@ -83,11 +83,12 @@ class HybridARIMALSTMTrainer:
 
         return np.array(X_raw), np.array(y_raw), n_feat
 
-    def find_best_params(self, train_target: pd.Series, train_exog: pd.DataFrame, param_distributions: dict, n_iter: int = 3) -> dict:
+    def find_best_params(self, train_target: pd.Series, train_exog: pd.DataFrame, param_distributions: dict, n_iter: int = 3, use_bayesian: bool = True) -> dict:
+
         """
         1. Búsqueda por AIC para el mejor ARIMA.
         2. Extracción de residuos.
-        3. Grid Search Purged & Embargoed para el LSTM.
+        3. Optimización Bayesiana (Optuna) o ParameterSampler para el LSTM Clasificador.
         """
         print(f"  🔍 [FASE 1] Buscando filtro lineal óptimo (Minimizando AIC)...")
         best_aic = np.inf
@@ -114,6 +115,58 @@ class HybridARIMALSTMTrainer:
         X_train_raw, y_train_raw, n_feat = self._create_3d_sequences(train_residuals, train_exog, train_target)
         
         # Escalamiento y Búsqueda LSTM
+        if use_bayesian:
+            try:
+                import optuna
+                from sklearn.metrics import accuracy_score
+                optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+                print(f"  🔍 [FASE 2] Optimizando LSTM Clasificador (Optuna Bayesiana TPE - Purged CV)...")
+                tf.keras.backend.clear_session()
+
+                scaler = StandardScaler()
+                s_tr, t_steps, _ = X_train_raw.shape
+                X_train_scaled = np.clip(
+                    scaler.fit_transform(X_train_raw.reshape(-1, n_feat)), -10, 10
+                ).reshape(s_tr, t_steps, n_feat)
+
+                folds = self._get_purged_embargoed_folds(s_tr)
+
+                def objective(trial):
+                    units = trial.suggest_categorical('units', [32, 64, 128])
+                    dropout = trial.suggest_float('dropout', 0.1, 0.4, step=0.1)
+
+                    fold_accs = []
+                    for fold_idx, (train_idx, val_idx) in enumerate(folds):
+                        if len(train_idx) == 0: continue
+                        model_cv = self._build_lstm_classifier((t_steps, n_feat), units=units, dropout=dropout)
+                        es = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True, verbose=0)
+                        model_cv.fit(
+                            X_train_scaled[train_idx], y_train_raw[train_idx],
+                            epochs=15, batch_size=32,
+                            validation_data=(X_train_scaled[val_idx], y_train_raw[val_idx]),
+                            callbacks=[es], verbose=0, shuffle=True
+                        )
+                        preds = (model_cv.predict(X_train_scaled[val_idx], verbose=0) > 0.5).astype(int)
+                        acc = accuracy_score(y_train_raw[val_idx], preds)
+                        fold_accs.append(acc)
+
+                        trial.report(acc, step=fold_idx)
+                        if trial.should_prune():
+                            raise optuna.TrialPruned()
+
+                    return float(np.mean(fold_accs)) if fold_accs else 0.0
+
+                study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
+                study.optimize(objective, n_trials=n_iter, show_progress_bar=False)
+
+                best_lstm_params = study.best_params
+                best_score = study.best_value
+                print(f"  ✅ Ganador Bayesiano (Optuna ARIMA-LSTM): {best_lstm_params} (Acc Interno: {best_score:.2%})")
+                return {'arima_order': best_arima_order, 'lstm_params': best_lstm_params}
+            except Exception as e:
+                print(f"  ⚠️ Fallback a ParameterSampler por error en Optuna: {e}")
+
         print(f"  🔍 [FASE 2] Optimizando LSTM Clasificador ({self.n_splits}-Fold Purged)...")
         tf.keras.backend.clear_session()
         
@@ -150,10 +203,11 @@ class HybridARIMALSTMTrainer:
                 best_acc = avg_acc
                 best_lstm_params = params
 
-        print(f"    > Ganador LSTM: {best_lstm_params} (Acc Interno: {best_acc:.2%})")
+        print(f"  ✅ Ganador LSTM: {best_lstm_params} (Acc Interno: {best_acc:.2%})")
         return {'arima_order': best_arima_order, 'lstm_params': best_lstm_params}
 
     def walk_forward_predict(self, target: pd.Series, exog: pd.DataFrame, train_size: int, best_params: dict) -> tuple:
+
         """
         Ejecuta el Walk-Forward manteniendo vivos y actualizando DOS modelos 
         (ARIMA y LSTM) de forma paralela y estep-by-step.

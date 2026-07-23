@@ -61,8 +61,52 @@ class XGBoostTrainer:
             folds.append((np.array(train_indices), np.array(val_indices)))
         return folds
 
-    def find_best_params(self, X_train: np.ndarray, y_train: np.ndarray, param_distributions: dict, n_iter: int = 10) -> dict:
-        """Búsqueda de la mejor arquitectura usando RandomizedSearchCV y Purged CV."""
+    def find_best_params(self, X_train: np.ndarray, y_train: np.ndarray, param_distributions: dict, n_iter: int = 10, use_bayesian: bool = True) -> dict:
+        """Búsqueda de la mejor arquitectura usando Optimización Bayesiana (Optuna) o RandomizedSearchCV."""
+        if use_bayesian:
+            try:
+                import optuna
+                from sklearn.metrics import f1_score
+                optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+                print(f"  🔍 Buscando hiperparámetros (Optimización Bayesiana Optuna TPE - Purged CV)...")
+                folds = self._get_purged_embargoed_folds(len(X_train))
+
+                def objective(trial):
+                    params = {
+                        'n_estimators': trial.suggest_int('n_estimators', 100, 1000, step=100),
+                        'max_depth': trial.suggest_int('max_depth', 3, 10),
+                        'learning_rate': trial.suggest_float('learning_rate', 0.005, 0.2, log=True),
+                        'subsample': trial.suggest_float('subsample', 0.5, 1.0)
+                    }
+
+                    scores = []
+                    for fold_idx, (train_idx, val_idx) in enumerate(folds):
+                        X_tr, y_tr = X_train[train_idx], y_train[train_idx]
+                        X_val, y_val = X_train[val_idx], y_train[val_idx]
+
+                        model = xgb.XGBClassifier(**params, random_state=42, n_jobs=-1, eval_metric='logloss')
+                        model.fit(X_tr, y_tr)
+                        preds = model.predict(X_val)
+                        score = f1_score(y_val, preds, average='macro')
+                        scores.append(score)
+
+                        trial.report(score, step=fold_idx)
+                        if trial.should_prune():
+                            raise optuna.TrialPruned()
+
+                    return float(np.mean(scores))
+
+                study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
+                study.optimize(objective, n_trials=n_iter, show_progress_bar=False)
+
+                best_params = study.best_params
+                best_score = study.best_value
+                print(f"  ✅ Ganador Bayesiano (Optuna): {best_params} (Score CV: {best_score:.4f})")
+                return best_params
+            except Exception as e:
+                print(f"  ⚠️ Fallback a RandomizedSearchCV por error en Optuna: {e}")
+
         from sklearn.model_selection import RandomizedSearchCV
         print(f"  🔍 Buscando hiperparámetros (RandomizedSearchCV - Purged & Embargoed CV para XGBoost)...")
         folds = self._get_purged_embargoed_folds(len(X_train))
@@ -84,6 +128,7 @@ class XGBoostTrainer:
 
         print(f"  ✅ Ganador: {best_params} (Score CV: {best_score:.2f})")
         return best_params
+
 
     def walk_forward_predict(self, X_train: np.ndarray, y_train: np.ndarray, 
                              X_test: np.ndarray, y_test: np.ndarray, best_params: dict) -> tuple:

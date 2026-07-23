@@ -88,11 +88,12 @@ python src/main_preprocessing.py
 ```
 *Se conecta a MT5 y Yahoo Finance para extraer desde el año 2000. Aplica FFD, EGARCH, Triple Barrera y guarda todo en `data/processed/`.*
 
-### 2. El "Retuning" Maestro (Generar Obreros)
+### 2. El "Retuning" Maestro (Generar Obreros con Optuna)
 ```bash
 python src/main_training.py
 ```
-*El script más pesado. Ejecútalo 1 o 2 veces al año. Pone a competir a decenas de arquitecturas (XGBoost, LSTM, BiLSTM, ARIMA-LSTM, LSTM-RF) con diferentes bancos de datos. Realiza Grid Search, Purged K-Fold y genera simulaciones de Walk-Forward. Emite archivos `.npy` con predicciones puras y `.pkl` con modelos entrenados en `results/`.*
+*El script más pesado. Ejecútalo 1 o 2 veces al año. Pone a competir a decenas de arquitecturas (XGBoost, RandomForest, LSTM, BiLSTM, ARIMA-LSTM, LSTM-RF) utilizando **Optimización Bayesiana (Optuna TPE Sampler + Purged CV Pruning)**. A diferencia de las búsquedas aleatorias tradicionales, Optuna aprende del historial de hiperparámetros y poda ejecuciones poco prometedoras rápidamente, reduciendo los tiempos de cómputo en un 40-60%. Emite archivos `.npy` con predicciones puras y `.pkl` con modelos entrenados en `results/`.*
+
 
 ### 3. Simulación Financiera y Entrenamiento MLOps (`portfolio_backtester.py`)
 ```bash

@@ -85,8 +85,60 @@ class BiLSTMTrainer:
         model.compile(optimizer=Adam(learning_rate=0.0005), loss='binary_crossentropy', metrics=['accuracy'])
         return model
 
-    def find_best_params(self, X_train: np.ndarray, y_train: np.ndarray, param_distributions: dict, n_iter: int = 3) -> dict:
-        """Búsqueda Aleatoria 3D con K-Fold Purged & Embargoed (Lightweight)."""
+    def find_best_params(self, X_train: np.ndarray, y_train: np.ndarray, param_distributions: dict, n_iter: int = 3, use_bayesian: bool = True) -> dict:
+        """Búsqueda de hiperparámetros usando Optimización Bayesiana (Optuna) o ParameterSampler 3D."""
+        if use_bayesian:
+            try:
+                import optuna
+                from sklearn.metrics import accuracy_score
+                optuna.logging.set_verbosity(optuna.logging.WARNING)
+
+                print(f"  🔍 Buscando hiperparámetros (Optimización Bayesiana Optuna TPE - Purged CV para BiLSTM)...")
+                tf.keras.backend.clear_session()
+
+                s_tr, t_steps, n_feat = X_train.shape
+                temp_scaler = StandardScaler()
+                X_train_scaled = np.clip(
+                    temp_scaler.fit_transform(X_train.reshape(-1, n_feat)), -10, 10
+                ).reshape(s_tr, t_steps, n_feat)
+
+                folds = self._get_purged_embargoed_folds(s_tr)
+
+                def objective(trial):
+                    units = trial.suggest_categorical('units', [32, 64, 128, 256])
+                    dropout = trial.suggest_float('dropout', 0.1, 0.4, step=0.1)
+
+                    fold_accs = []
+                    for fold_idx, (train_idx, val_idx) in enumerate(folds):
+                        if len(train_idx) == 0: continue
+                        model_cv = self._build_model((t_steps, n_feat), units=units, dropout=dropout)
+                        es = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True, verbose=0)
+                        model_cv.fit(
+                            X_train_scaled[train_idx], y_train[train_idx],
+                            epochs=15, batch_size=32,
+                            validation_data=(X_train_scaled[val_idx], y_train[val_idx]),
+                            callbacks=[es], verbose=0, shuffle=True
+                        )
+                        preds = (model_cv.predict(X_train_scaled[val_idx], verbose=0) > 0.5).astype(int)
+                        acc = accuracy_score(y_train[val_idx], preds)
+                        fold_accs.append(acc)
+
+                        trial.report(acc, step=fold_idx)
+                        if trial.should_prune():
+                            raise optuna.TrialPruned()
+
+                    return float(np.mean(fold_accs)) if fold_accs else 0.0
+
+                study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
+                study.optimize(objective, n_trials=n_iter, show_progress_bar=False)
+
+                best_params = study.best_params
+                best_score = study.best_value
+                print(f"  ✅ Ganador Bayesiano (Optuna BiLSTM): {best_params} (Acc Interno: {best_score:.2%})")
+                return best_params
+            except Exception as e:
+                print(f"  ⚠️ Fallback a ParameterSampler por error en Optuna: {e}")
+
         print(f"  🔍 Buscando hiperparámetros (Purged & Embargoed CV para BiLSTM)...")
         tf.keras.backend.clear_session()
         
@@ -126,6 +178,7 @@ class BiLSTMTrainer:
 
         print(f"  ✅ Ganador: {best_params} (Acc Interno: {best_acc:.2%})")
         return best_params
+
 
     def walk_forward_predict(self, X_train: np.ndarray, y_train: np.ndarray, 
                              X_test: np.ndarray, y_test: np.ndarray, best_params: dict) -> tuple:
