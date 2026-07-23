@@ -66,8 +66,8 @@ class VolatilityModeler:
             pred = res.forecast(horizon=1, reindex=False)
             vol_pred = np.sqrt(pred.variance.values[-1, 0])
             
-            # FILTRO DE CORDURA: Si es NaN, infinito, o irrealmente alto (> 5% de volatilidad diaria)
-            if np.isnan(vol_pred) or np.isinf(vol_pred) or vol_pred > 5.0:
+            # FILTRO DE CORDURA: Si es NaN, infinito, prácticamente cero, o irrealmente alto (> 5% diaria)
+            if np.isnan(vol_pred) or np.isinf(vol_pred) or vol_pred > 5.0 or vol_pred < 1e-6:
                 
                 # Intento 2: GARCH(1,1) estándar (Simétrico, mucho más robusto)
                 model_fallback = arch_model(train_window, vol='Garch', p=1, q=1, rescale=False)
@@ -76,7 +76,7 @@ class VolatilityModeler:
                 vol_pred = np.sqrt(pred_fallback.variance.values[-1, 0])
                 
                 # Intento 3: Si todo el álgebra lineal falla
-                if np.isnan(vol_pred) or np.isinf(vol_pred) or vol_pred > 5.0:
+                if np.isnan(vol_pred) or np.isinf(vol_pred) or vol_pred > 5.0 or vol_pred < 1e-6:
                     vol_pred = vol_historica
                     
         except Exception:
