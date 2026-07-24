@@ -558,15 +558,21 @@ class MultiAssetBotManager:
                 with open(hrp_path, 'r') as f:
                     hrp_weights = json.load(f)
                 logging.info(f"⚖️ Pesos de Portafolio HRP detectados: {hrp_weights}")
+                active_hrp = {bot.symbol: hrp_weights.get(bot.symbol, 0.0) for bot in self.bots}
+                total_active_weight = sum(active_hrp.values())
+                
+                if total_active_weight > 0:
+                    norm_hrp = {sym: w / total_active_weight for sym, w in active_hrp.items()}
+                else:
+                    norm_hrp = {bot.symbol: 1.0 / len(self.bots) for bot in self.bots}
+
                 for bot in self.bots:
-                    if bot.symbol in hrp_weights:
-                        peso_hrp = hrp_weights[bot.symbol]
-                        riesgo_original = bot.risk_manager.risk_per_trade_pct
-                        # El peso HRP indica qué % del capital total va a este activo.
-                        # Asumiendo que el riesgo original era para el 100% del capital.
-                        nuevo_riesgo = riesgo_original * peso_hrp * len(self.bots) # Escalar proporcionalmente
-                        bot.risk_manager.risk_per_trade_pct = nuevo_riesgo
-                        logging.info(f"  > [{bot.symbol}] Riesgo Base ajustado por HRP: {riesgo_original:.2%} -> {nuevo_riesgo:.2%}")
+                    peso_norm = norm_hrp.get(bot.symbol, 0.0)
+                    riesgo_original = bot.risk_manager.risk_per_trade_pct
+                    nuevo_riesgo = riesgo_original * peso_norm
+                    bot.risk_manager.risk_per_trade_pct = nuevo_riesgo
+                    logging.info(f"  > [{bot.symbol}] Riesgo Base ajustado por HRP Re-normalizado ({peso_norm:.2%}): {riesgo_original:.2%} -> {nuevo_riesgo:.2%}")
+
             else:
                 logging.warning("⚠️ No se encontró 'hrp_weights.json'. Operando con pesos distribuidos uniformemente (1/N).")
 

@@ -29,9 +29,15 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
         print("❌ No se encontraron modelos campeones en caché. Ejecuta main_training.py primero.")
         return
         
-    # 2. Elegir el mejor modelo (El Campeón de Campeones por Alpha)
-    mejor_modelo = max(campeones.keys(), key=lambda k: campeones[k]['alpha'])
-    data = campeones[mejor_modelo]
+    # 2. Elegir el mejor modelo (El Campeón de Campeones con Alpha Positivo y Vivo)
+    campeones_validos = {mod: data for mod, data in campeones.items() if not data.get('is_dead', False) and data['alpha'] > 0}
+    if not campeones_validos:
+        print(f"❌ No hay campeones viables (Alpha > 0 y Vivos) para {activo}.")
+        return None
+
+    mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['alpha'])
+    data = campeones_validos[mejor_modelo]
+
     cum_ret_series = data['cum_ret_series']
     exit_times = data['exit_times']
     probs_series = data.get('probs_series', np.zeros(len(cum_ret_series)))
