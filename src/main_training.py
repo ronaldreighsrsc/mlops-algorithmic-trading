@@ -28,7 +28,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # CONFIGURACIÓN DEL EXPERIMENTO
 # ==============================================================================
 # ⚠️ MODO RECUPERACIÓN (Crash RAM): Corriendo de a 1 activo.
-ACTIVOS_A_CORRER = ["ECH", "EURUSD", "SP500", "Oro"]
+ACTIVOS_A_CORRER = ["ECH", "EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4"]
 MODELOS_A_CORRER = [
     'RANDOM_FOREST',
     'XGBOOST', 
@@ -46,21 +46,23 @@ HIBRIDO_RF_GRID = {'units': [32, 64, 128], 'dropout': [0.1, 0.2, 0.3]}
 
 # Bancos de Variables Dinámicos por Activo
 def get_bancos_por_activo(activo: str):
+    base_asset = activo.split("_")[0]
     precio_puro = ['open_FFD', 'high_FFD', 'low_FFD']
     tecnicos = ['MACD_Hist', 'RSI', 'ATR', 'EGARCH_Vol']
     
-    if activo in ["ECH", "IPSA"]:
+    if base_asset in ["ECH", "IPSA"]:
         macros = ['TPM', 'EMBI', 'Copper_FFD', 'Yield10Y_FFD', 'USDCLP_FFD']
         globales = ['SP500_FFD', 'VIX_close', 'FXI_FFD']
-    elif activo in ["EURUSD", "SP500"]:
+    elif base_asset in ["EURUSD", "SP500"]:
         macros = ['Yield10Y_FFD']
         globales = ['VIX_close', 'DXY_close_FFD']
-    elif activo == "Oro":
+    elif base_asset == "Oro":
         macros = ['Yield10Y_FFD', 'DXY_close_FFD'] 
         globales = ['SP500_FFD', 'VIX_close']
     else:
         macros = []
         globales = []
+
 
     bancos = {
         "Precio_Puro": precio_puro,

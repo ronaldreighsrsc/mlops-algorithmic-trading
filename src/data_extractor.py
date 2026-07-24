@@ -182,44 +182,52 @@ class DataExtractor:
         logging.info(f"Datos guardados exitosamente en: {file_path}")
 
 if __name__ == "__main__":
-    activos = {
-        "SP500": "SP500", 
-        "EURUSD": "EURUSD", 
-        "Oro": "XAUUSD",
-        "ECH": "ECH"
-    }
+    target_extractions = [
+        {"nombre": "EURUSD", "ticker": "EURUSD", "timeframe": mt5.TIMEFRAME_D1, "filename": "EURUSD_daily.csv"},
+        {"nombre": "EURUSD_H4", "ticker": "EURUSD", "timeframe": mt5.TIMEFRAME_H4, "filename": "EURUSD_H4_daily.csv"},
+        {"nombre": "SP500", "ticker": "SP500", "timeframe": mt5.TIMEFRAME_D1, "filename": "SP500_daily.csv"},
+        {"nombre": "SP500_H4", "ticker": "SP500", "timeframe": mt5.TIMEFRAME_H4, "filename": "SP500_H4_daily.csv"},
+        {"nombre": "Oro", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_D1, "filename": "Oro_daily.csv"},
+        {"nombre": "Oro_H4", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_H4, "filename": "Oro_H4_daily.csv"},
+        {"nombre": "ECH", "ticker": "ECH", "timeframe": mt5.TIMEFRAME_D1, "filename": "ECH_daily.csv"},
+    ]
     
     # Intentamos desde el año 2000
     end_dt = datetime.now()
     start_dt = datetime(2000, 1, 1)
     
-    # TRUCO DEL USUARIO: Reconectar (Abrir y Cerrar) por cada activo
-    for nombre, ticker in activos.items():
-        logging.info(f"\n--- Iniciando ciclo de extracción aislado para {ticker} ---")
+    # TRUCO DEL USUARIO: Reconectar (Abrir y Cerrar) por cada activo/timeframe
+    for item in target_extractions:
+        nombre = item["nombre"]
+        ticker = item["ticker"]
+        tf = item["timeframe"]
+        filename = item["filename"]
+        
+        logging.info(f"\n--- Iniciando ciclo de extracción aislado para {nombre} ({ticker}) ---")
         
         # Para ECH, saltar MT5 e ir directo a yfinance
         if ticker == "ECH":
             extractor = DataExtractor(None)
             df_activo = extractor.get_historical_data_yfinance(ticker, start_dt, end_dt)
             if not df_activo.empty:
-                # ECH usa el índice como time, lo reseteamos para guardar igual que MT5
                 df_activo.reset_index(inplace=True)
-                extractor.save_to_csv(df_activo, f"{nombre}_daily.csv")
+                extractor.save_to_csv(df_activo, filename)
         else:
             conn = MT5Connector()
             if conn.connect():
                 extractor = DataExtractor(conn)
                 df_activo = extractor.get_historical_data_chunked(
                     symbol=ticker, 
-                    timeframe=mt5.TIMEFRAME_D1,
+                    timeframe=tf,
                     start_date=start_dt, 
                     end_date=end_dt
                 )
                 
                 if not df_activo.empty:
                     df_activo.reset_index(inplace=True)
-                    extractor.save_to_csv(df_activo, f"{nombre}_daily.csv")
+                    extractor.save_to_csv(df_activo, filename)
                     
                 conn.shutdown() # Cerramos la conexión específica de este activo
             
         time.sleep(1) # Pausa técnica antes de abrir la siguiente conexión
+
