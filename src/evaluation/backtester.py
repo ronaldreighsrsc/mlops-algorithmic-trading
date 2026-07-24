@@ -688,7 +688,10 @@ class TripleBarrierBacktester:
         except ImportError:
             features = []
             
+        tf_str = "H4" if "H4" in self.activo else ("H1" if "H1" in self.activo else "D1")
         config = {
+            "activo": self.activo,
+            "timeframe": tf_str,
             "model_type": mejor_modelo,
             "model_file": model_file,
             "banco": banco_clean,
@@ -743,7 +746,8 @@ def main():
     data_dir = os.path.join(base_dir, "data")
     results_dir = os.path.join(base_dir, "results")
     
-    activos = ["EURUSD", "SP500", "Oro", "ECH"]
+    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+
     modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
     RIESGO_PCT = 0.025
     
