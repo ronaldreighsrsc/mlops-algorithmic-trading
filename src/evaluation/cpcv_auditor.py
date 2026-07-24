@@ -187,24 +187,18 @@ class CPCVAuditor:
 
 if __name__ == "__main__":
     import json
-    symbol = "EURUSD"
-    print(f"Iniciando Auditoría CPCV & PBO para {symbol}...")
+    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
     
-    proc_path = os.path.join(base_dir, "data", "processed", f"{symbol}_processed.csv")
-    probs_file = [f for f in os.listdir(os.path.join(base_dir, "results")) if f.startswith(f"probs_") and symbol in f]
-    
-    if os.path.exists(proc_path) and probs_file:
-        df_proc = pd.read_csv(proc_path)
-        probs_path = os.path.join(base_dir, "results", probs_file[0])
-        probs = np.load(probs_path)
+    for symbol in activos:
+        proc_path = os.path.join(base_dir, "data", "processed", f"{symbol}_processed.csv")
+        probs_file = [f for f in os.listdir(os.path.join(base_dir, "results")) if f.startswith("probs_") and symbol in f]
         
-        auditor = CPCVAuditor(symbol=symbol)
-        results = auditor.audit_strategy(df_proc, probs)
-    else:
-        print("Sintetizando prueba unitaria rápida...")
-        np.random.seed(42)
-        df_dummy = pd.DataFrame({'close': 1.10 + np.cumsum(np.random.randn(500) * 0.001)})
-        probs_dummy = np.random.uniform(0.3, 0.7, 500)
-        
-        auditor = CPCVAuditor(symbol="EURUSD_DEMO")
-        auditor.audit_strategy(df_dummy, probs_dummy)
+        if os.path.exists(proc_path) and probs_file:
+            print(f"\n🔍 Auditoría CPCV & PBO para {symbol}...")
+            df_proc = pd.read_csv(proc_path)
+            probs_path = os.path.join(base_dir, "results", probs_file[0])
+            probs = np.load(probs_path)
+            
+            auditor = CPCVAuditor(symbol=symbol)
+            auditor.audit_strategy(df_proc, probs)
+

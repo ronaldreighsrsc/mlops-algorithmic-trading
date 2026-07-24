@@ -205,7 +205,8 @@ if __name__ == "__main__":
     CAPITAL = 10000.0       # USD en tu broker
     RIESGO_PCT = 0.025       
     
-    activos = ["EURUSD", "SP500", "Oro", "ECH"]
+    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+
     
     # 1. Simulación Individual (Silos)
     series_retornos = {}
