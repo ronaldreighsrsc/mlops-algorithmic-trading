@@ -147,10 +147,12 @@ class DataExtractor:
                 macro_chile = ChileanMacroExtractor()
                 df_chile = macro_chile.get_chilean_macro_data(start_date, end_date)
                 if not df_chile.empty:
-                    df = df.join(df_chile, how='left')
-                    # Forward fill para feriados
-                    cols_chile = df_chile.columns
-                    df[cols_chile] = df[cols_chile].ffill().bfill()
+                    cols_to_use = [c for c in df_chile.columns if c not in df.columns]
+                    if cols_to_use:
+                        df = df.join(df_chile[cols_to_use], how='left')
+                        # Forward fill para feriados
+                        df[cols_to_use] = df[cols_to_use].ffill().bfill()
+
                 
             logging.info(f"Éxito: Se extrajeron {len(df)} registros totales para {symbol} vía yfinance.")
             df.reset_index(inplace=True)
