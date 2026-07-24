@@ -40,6 +40,27 @@ Seguimiento automático de experimentos MLOps. Registra hiperparámetros, métri
 
 ---
 
+## 📏 Benchmark SMA-200 (Validación Institucional)
+
+En la industria cuantitativa, el estándar de validación más riguroso para un modelo de Machine Learning **no es ganarle al Buy & Hold**, sino superar a la estrategia de tendencia más simple de la historia: la **Media Móvil Simple de 200 períodos (SMA-200)**.
+
+### Regla de la SMA-200 (Long-Only / Long-Cash)
+| Condición | Acción |
+|-----------|--------|
+| `Close > SMA(200)` | **LONG** — Inversión activa (captura el rendimiento del mercado) |
+| `Close ≤ SMA(200)` | **CASH** — Fuera del mercado (rendimiento 0%, protege de caídas) |
+
+- **No hace Short.** Simplemente vende y se queda en efectivo durante las caídas.
+- Para activos **H4**, se usa SMA-1200 (200 días × 6 velas/día) para preservar la equivalencia temporal.
+
+### ¿Dónde aparece en el sistema?
+1. **`backtester.py`** — Fila extra en la tabla HTML (`backtest_report_*.html`) y línea verde punteada en `equity_curve_*.png`.
+2. **`portfolio_backtester.py`** — Línea verde en el gráfico individual de cada activo. Tercera línea "1/N + SMA-200" en el gráfico global HRP.
+
+> [!IMPORTANT]
+> La SMA-200 es **exclusivamente un benchmark visual**. El Bot en producción (`main_bot.py`) **NO la utiliza**. Su único propósito es demostrar matemáticamente que el Machine Learning aporta valor real sobre la regla más simple posible.
+
+---
 
 ## 📁 Estructura del Proyecto
 

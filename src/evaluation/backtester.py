@@ -119,6 +119,81 @@ class TripleBarrierBacktester:
 
         return {'DSR': dsr, 'MC_MDD_95': mc_mdd_95}
 
+    def _compute_sma_benchmark(self, df_backtest):
+        """Calcula el benchmark SMA-200 (Long-Only / Long-Cash) sobre el periodo OOS.
+        Para H4 usa SMA-1200 (200 días × 6 velas H4/día) para equivalencia temporal.
+        Regla: Si Close > SMA → LONG (captura retorno). Si Close <= SMA → CASH (retorno 0%)."""
+        closes = df_backtest['close'].values
+        
+        # Determinar periodo SMA según temporalidad del activo
+        if '_H4' in self.activo:
+            sma_period = 1200   # 200 días × 6 velas H4 por día
+        elif '_H1' in self.activo:
+            sma_period = 4800   # 200 días × 24 velas H1 por día
+        else:
+            sma_period = 200    # D1: 200 velas diarias
+        
+        if len(closes) < sma_period + 1:
+            # No hay suficientes datos para calcular la SMA → retornar vacío
+            return None
+        
+        # Calcular SMA con rolling sobre toda la serie
+        sma = pd.Series(closes).rolling(window=sma_period).mean().values
+        
+        # Generar retornos Long-Cash: si close > sma → retorno del mercado, sino → 0
+        daily_returns = np.diff(closes) / closes[:-1]  # retornos simples
+        sma_returns = []
+        for t in range(len(daily_returns)):
+            if np.isnan(sma[t]) or sma[t] == 0:
+                sma_returns.append(0.0)
+            elif closes[t] > sma[t]:
+                sma_returns.append(daily_returns[t])  # LONG: captura el retorno
+            else:
+                sma_returns.append(0.0)  # CASH: fuera del mercado
+        
+        sma_returns = np.array(sma_returns)
+        sma_cum_ret = (1 + sma_returns).cumprod()
+        
+        # Métricas del benchmark SMA
+        total_ret = sma_cum_ret[-1] - 1 if len(sma_cum_ret) > 0 else 0
+        
+        # CAGR
+        if 'time' in df_backtest.columns:
+            dias = (pd.to_datetime(df_backtest['time'].iloc[-1]) - pd.to_datetime(df_backtest['time'].iloc[0])).days
+            anios = dias / 365.25 if dias > 0 else 1
+        else:
+            anios = len(closes) / 252
+        cagr = (1 + total_ret) ** (1 / anios) - 1 if anios > 0 else 0
+        
+        # Sharpe
+        std = np.std(sma_returns)
+        sharpe = (np.mean(sma_returns) / std) * np.sqrt(252) if std > 0 else 0
+        
+        # MDD
+        cum_series = pd.Series(sma_cum_ret)
+        running_max = cum_series.cummax()
+        drawdown = (cum_series - running_max) / running_max
+        mdd = drawdown.min()
+        
+        # Generar timeline para el gráfico
+        if 'time' in df_backtest.columns:
+            times = pd.to_datetime(df_backtest['time'].values[1:])  # alineado con retornos
+        else:
+            times = df_backtest.index[1:]
+        
+        sma_label = f"SMA-{sma_period}" if sma_period != 200 else "SMA-200"
+        
+        return {
+            'cum_ret': sma_cum_ret,
+            'times': times,
+            'total_ret': total_ret,
+            'cagr': cagr,
+            'sharpe': sharpe,
+            'mdd': mdd,
+            'label': sma_label,
+            'sma_period': sma_period
+        }
+
     def simulate_trades(self, df, probabilities, hybrid_monitor=None, is_training_phase=False, macro_cols=None):
         """Simula las operaciones evaluando HybridRiskMonitor y Single-Position (sin superposición).
         Si self.bilateral=True (EURUSD), también abre posiciones en CORTO cuando
@@ -487,10 +562,17 @@ class TripleBarrierBacktester:
                 status_str = "💀 MUERTO (Anomalía)" if campeon_actual['is_dead'] else "✅ ACTIVO"
                 print(f"  Campeon {modelo.upper():>15}: {campeon_actual['banco']:<15} | Estado: {status_str} | Alpha: {campeon_actual['alpha']:>8.2%} | Win: {campeon_actual['win_rate']:>6.1%} | Trades: {campeon_actual['trades']}")
 
-        return campeones, df_backtest if 'df_backtest' in locals() else None
+        # Calcular benchmark SMA-200 sobre el periodo OOS
+        sma_bench = None
+        if 'df_backtest' in locals() and df_backtest is not None:
+            sma_bench = self._compute_sma_benchmark(df_backtest)
+            if sma_bench:
+                print(f"  📏 Benchmark {sma_bench['label']}: CAGR={sma_bench['cagr']:.2%} | Sharpe={sma_bench['sharpe']:.2f} | MDD={sma_bench['mdd']:.2%}")
+
+        return campeones, df_backtest if 'df_backtest' in locals() else None, sma_bench
 
 
-    def generate_html_report(self, campeones):
+    def generate_html_report(self, campeones, sma_benchmark=None):
         if not campeones:
             print("  No hay campeones para generar reporte.")
             return
@@ -571,6 +653,19 @@ class TripleBarrierBacktester:
                     <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
                 </tr>
 """
+        # Fila SMA-200 Benchmark (si está disponible)
+        if sma_benchmark is not None:
+            sma_cagr_cls = "positive" if sma_benchmark['cagr'] >= 0 else "negative"
+            html += f"""
+                <tr class="bench">
+                    <td>BENCHMARK</td><td>{sma_benchmark['label']} Trend Following</td><td>-</td><td>-</td>
+                    <td class="{sma_cagr_cls}">{sma_benchmark['cagr']:.2%}</td>
+                    <td>-</td><td>-</td><td>-</td>
+                    <td>{sma_benchmark['sharpe']:.2f}</td><td>-</td><td>-</td>
+                    <td>{sma_benchmark['mdd']:.2%}</td><td>-</td>
+                </tr>
+"""
+
         for mod, data in campeones.items():
             m = data['metrics']
             is_dead = data.get('is_dead', False)
@@ -605,7 +700,7 @@ class TripleBarrierBacktester:
         import webbrowser
         webbrowser.open(f"file://{os.path.abspath(report_path)}")
 
-    def plot_equity_curves(self, campeones, df_backtest):
+    def plot_equity_curves(self, campeones, df_backtest, sma_benchmark=None):
         """Genera y guarda un gráfico comparativo de las curvas de Equity."""
         if not campeones:
             return
@@ -625,6 +720,13 @@ class TripleBarrierBacktester:
             mkt_cagr_str = f" - CAGR: {primer['cagr_mkt']:.2%}" if primer else ""
             
             plt.plot(mkt_times, mkt_equity, label=f"Buy & Hold (Benchmark){mkt_cagr_str}", color='black', linewidth=2.5, linestyle='-', zorder=1)
+        
+        # Plotear Benchmark SMA-200 (Línea verde punteada)
+        if sma_benchmark is not None:
+            sma_label = sma_benchmark['label']
+            plt.plot(sma_benchmark['times'], sma_benchmark['cum_ret'],
+                     label=f"{sma_label} Trend Following - CAGR: {sma_benchmark['cagr']:.2%} | Sharpe: {sma_benchmark['sharpe']:.2f}",
+                     color='#10b981', linewidth=2.0, linestyle='--', zorder=2)
         
         for mod, data in campeones.items():
             cum_ret_series = data['cum_ret_series']
@@ -649,7 +751,7 @@ class TripleBarrierBacktester:
         plt.axhline(y=1.0, color='r', linestyle='--', alpha=0.5)
         plt.xlabel("Fecha de Cierre del Trade", fontsize=12)
         plt.ylabel("Crecimiento del Capital (Equity)", fontsize=12)
-        plt.legend(loc='upper left')
+        plt.legend(loc='upper left', fontsize=8)
         plt.grid(True, alpha=0.3)
         plt.xticks(rotation=45)
         
@@ -658,16 +760,25 @@ class TripleBarrierBacktester:
         plt.close()
         print(f"  📈 Gráfico de Equity guardado en: {plot_path}")
 
-    def export_champion_config(self, campeones):
-        """Busca el mejor modelo con Alpha > 0 y vivo, y lo exporta a JSON."""
+    def export_champion_config(self, campeones, sma_benchmark=None):
+        """Busca el mejor modelo con Alpha > 0, vivo y que supere al SMA-200, y lo exporta a JSON."""
         if not campeones:
             return
             
         # Filtrar campeones vivos y con alpha > 0
         campeones_validos = {mod: data for mod, data in campeones.items() if not data.get('is_dead', False) and data['alpha'] > 0}
         
+        # Filtro 3: Superar al SMA-200 (si está disponible)
+        if sma_benchmark is not None and campeones_validos:
+            sma_cagr = sma_benchmark['cagr']
+            antes = len(campeones_validos)
+            campeones_validos = {mod: data for mod, data in campeones_validos.items() if data['cagr_est'] > sma_cagr}
+            eliminados = antes - len(campeones_validos)
+            if eliminados > 0:
+                print(f"  📏 Filtro SMA-200: {eliminados} campeón(es) eliminado(s) por no superar CAGR del {sma_benchmark['label']} ({sma_cagr:.2%})")
+        
         if not campeones_validos:
-            print(f"  ⚠️ No hay campeones viables (Alpha > 0 y Vivos) para {self.activo}. No se exportará configuración para producción.")
+            print(f"  ⚠️ No hay campeones viables (Alpha > 0, Vivos y > SMA-200) para {self.activo}. No se exportará configuración para producción.")
             return
             
         mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['alpha'])
@@ -756,11 +867,11 @@ def main():
     for activo in activos:
         bancos = list(get_bancos_por_activo(activo).keys())
         backtester = TripleBarrierBacktester(activo, data_dir, results_dir, fast_mode=True)
-        campeones, df_backtest = backtester.run_tournament(modelos, bancos)
+        campeones, df_backtest, sma_benchmark = backtester.run_tournament(modelos, bancos)
         if campeones:
-            backtester.generate_html_report(campeones)
-            backtester.plot_equity_curves(campeones, df_backtest)
-            backtester.export_champion_config(campeones)
+            backtester.generate_html_report(campeones, sma_benchmark)
+            backtester.plot_equity_curves(campeones, df_backtest, sma_benchmark)
+            backtester.export_champion_config(campeones, sma_benchmark)
         else:
             print(f"No hay predicciones guardadas para {activo} aún.")
 

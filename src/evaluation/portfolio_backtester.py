@@ -25,14 +25,25 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     
     campeones_tuple = tester.run_tournament(modelos, bancos)
     campeones = campeones_tuple[0]
+    sma_benchmark = campeones_tuple[2] if len(campeones_tuple) > 2 else None
     if not campeones:
         print("❌ No se encontraron modelos campeones en caché. Ejecuta main_training.py primero.")
         return
         
-    # 2. Elegir el mejor modelo (El Campeón de Campeones con Alpha Positivo y Vivo)
+    # 2. Elegir el mejor modelo (El Campeón de Campeones con Alpha Positivo, Vivo y > SMA-200)
     campeones_validos = {mod: data for mod, data in campeones.items() if not data.get('is_dead', False) and data['alpha'] > 0}
+    
+    # Filtro 3: Superar al SMA-200 (si está disponible)
+    if sma_benchmark is not None and campeones_validos:
+        sma_cagr = sma_benchmark['cagr']
+        antes = len(campeones_validos)
+        campeones_validos = {mod: data for mod, data in campeones_validos.items() if data['cagr_est'] > sma_cagr}
+        eliminados = antes - len(campeones_validos)
+        if eliminados > 0:
+            print(f"  📏 Filtro SMA-200: {eliminados} campeón(es) eliminado(s) por no superar CAGR del {sma_benchmark['label']} ({sma_cagr:.2%})")
+    
     if not campeones_validos:
-        print(f"❌ No hay campeones viables (Alpha > 0 y Vivos) para {activo}.")
+        print(f"❌ No hay campeones viables (Alpha > 0, Vivos y > SMA-200) para {activo}.")
         return None
 
     mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['alpha'])
@@ -120,6 +131,53 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     # 5. Graficar Billetera Real
     plt.figure(figsize=(12, 6))
     plt.plot(fechas, historial_capital, label=f'Equidad con Kelly Dinámico (Base {riesgo_por_trade*100}%)', color='green', linewidth=2.5)
+    
+    # Benchmark SMA-200 (Long-Cash) sobre el precio crudo del activo
+    try:
+        # Determinar periodo SMA según temporalidad
+        if '_H4' in activo:
+            sma_period = 1200
+        elif '_H1' in activo:
+            sma_period = 4800
+        else:
+            sma_period = 200
+        
+        raw_path = os.path.join(data_dir, "raw", f"{activo}_daily.csv")
+        if os.path.exists(raw_path):
+            df_raw = pd.read_csv(raw_path)
+            if 'time' in df_raw.columns:
+                df_raw['time'] = pd.to_datetime(df_raw['time'])
+            raw_closes = df_raw['close'].values
+            
+            if len(raw_closes) >= sma_period + 1:
+                sma_vals = pd.Series(raw_closes).rolling(window=sma_period).mean().values
+                # Simular capital SMA-200
+                capital_sma = capital_inicial
+                historial_sma = [capital_inicial]
+                fechas_sma = [fechas[0]]
+                raw_returns = np.diff(raw_closes) / raw_closes[:-1]
+                
+                # Alinear con el periodo de test (usar los últimos N retornos)
+                n_test_period = len(fechas) - 1  # número de trades
+                start_idx = max(0, len(raw_returns) - n_test_period)
+                
+                for t in range(start_idx, len(raw_returns)):
+                    if not np.isnan(sma_vals[t]) and sma_vals[t] > 0 and raw_closes[t] > sma_vals[t]:
+                        capital_sma *= (1 + raw_returns[t] * (riesgo_por_trade / 0.015))  # misma escala de apalancamiento
+                    # Si close <= SMA: CASH (no gana ni pierde)
+                    historial_sma.append(capital_sma)
+                    if 'time' in df_raw.columns and t + 1 < len(df_raw):
+                        fechas_sma.append(df_raw['time'].iloc[t + 1])
+                    else:
+                        fechas_sma.append(fechas_sma[-1])
+                
+                sma_label = f"SMA-{sma_period}" if sma_period != 200 else "SMA-200"
+                plt.plot(fechas_sma[:len(historial_sma)], historial_sma, 
+                         label=f'{sma_label} Trend Following (Benchmark)', 
+                         color='#10b981', linewidth=2.0, linestyle='--')
+    except Exception as e:
+        print(f"  ⚠️ SMA Benchmark no disponible: {e}")
+    
     plt.title(f"Simulador de Billetera Real (Portfolio Backtest) - {activo}", fontsize=15, fontweight='bold')
     plt.ylabel("Capital en Dólares ($USD)", fontsize=12)
     plt.xlabel("Timeline de Inversión", fontsize=12)
@@ -128,7 +186,7 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     plt.axhline(y=capital_inicial, color='red', linestyle='--', alpha=0.7, label='Depósito Inicial')
     
     plt.grid(True, linestyle=':', alpha=0.6)
-    plt.legend()
+    plt.legend(fontsize=8)
     plt.tight_layout()
     chart_path = f"portfolio_backtest_{activo}.png"
     plt.savefig(chart_path)
@@ -221,6 +279,7 @@ if __name__ == "__main__":
         
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         results_dir = os.path.join(base_dir, "results")
+        data_dir = os.path.join(base_dir, "data")
         
         if not series_retornos:
             print("No hay datos de campeones para simular el portafolio global.")
@@ -239,9 +298,11 @@ if __name__ == "__main__":
         
         capital_hrp = capital_inicial
         capital_eq = capital_inicial
+        capital_sma = capital_inicial
         
         historial_hrp = [capital_inicial]
         historial_eq = [capital_inicial]
+        historial_sma = [capital_inicial]
         fechas_sim = [df_returns.index[0]]
         
         if len(df_returns) < 100:
@@ -249,6 +310,29 @@ if __name__ == "__main__":
             return
             
         pesos_hrp = pd.Series(1.0 / len(activos), index=activos)
+        
+        # Pre-calcular SMA-200 para cada activo (Long-Cash filter)
+        sma_signals = {}
+        for act in series_retornos.keys():
+            try:
+                sma_period = 1200 if '_H4' in act else (4800 if '_H1' in act else 200)
+                raw_path = os.path.join(data_dir, "raw", f"{act}_daily.csv")
+                if os.path.exists(raw_path):
+                    df_raw_act = pd.read_csv(raw_path)
+                    raw_closes = df_raw_act['close'].values
+                    sma_vals = pd.Series(raw_closes).rolling(window=sma_period).mean().values
+                    # Señal: True si close > SMA (LONG), False si no (CASH)
+                    signal = raw_closes > sma_vals
+                    # Tomar solo los últimos N valores para alinear con df_returns
+                    n_needed = len(df_returns)
+                    if len(signal) >= n_needed:
+                        sma_signals[act] = signal[-n_needed:]
+                    else:
+                        sma_signals[act] = np.ones(n_needed, dtype=bool)  # fallback: siempre long
+                else:
+                    sma_signals[act] = np.ones(len(df_returns), dtype=bool)
+            except Exception:
+                sma_signals[act] = np.ones(len(df_returns), dtype=bool)
         
         # Caminar a través del tiempo
         for i in range(100, len(df_returns)):
@@ -275,23 +359,40 @@ if __name__ == "__main__":
             pnl_pct_eq = (retornos_dia.sum() / len(activos))
             capital_eq *= (1 + pnl_pct_eq)
             
+            # PnL 1/N + SMA-200 Filter
+            activos_con_signal = list(series_retornos.keys())
+            sma_retorno = 0.0
+            n_activos_long = 0
+            for act in activos_con_signal:
+                if act in sma_signals and i < len(sma_signals[act]) and sma_signals[act][i]:
+                    sma_retorno += retornos_dia.get(act, 0.0)
+                    n_activos_long += 1
+            if n_activos_long > 0:
+                pnl_pct_sma = sma_retorno / len(activos_con_signal)  # Peso 1/N sobre total
+            else:
+                pnl_pct_sma = 0.0  # Todo en CASH
+            capital_sma *= (1 + pnl_pct_sma)
+            
             historial_hrp.append(capital_hrp)
             historial_eq.append(capital_eq)
+            historial_sma.append(capital_sma)
             fechas_sim.append(df_returns.index[i])
             
         print(f"\n📊 RESULTADOS FINALES GLOBAL PORTFOLIO (Rebalanceo Mensual)")
         print(f"============================================================")
         print(f"Capital Inicial: ${capital_inicial:,.2f}")
-        print(f"Capital Final HRP:   ${capital_hrp:,.2f} (ROI: {(capital_hrp/capital_inicial - 1):.2%})")
-        print(f"Capital Final 1/N:   ${capital_eq:,.2f} (ROI: {(capital_eq/capital_inicial - 1):.2%})")
+        print(f"Capital Final HRP:       ${capital_hrp:,.2f} (ROI: {(capital_hrp/capital_inicial - 1):.2%})")
+        print(f"Capital Final 1/N:       ${capital_eq:,.2f} (ROI: {(capital_eq/capital_inicial - 1):.2%})")
+        print(f"Capital Final 1/N+SMA:   ${capital_sma:,.2f} (ROI: {(capital_sma/capital_inicial - 1):.2%})")
         
         plt.figure(figsize=(12, 6))
         plt.plot(fechas_sim, historial_hrp, label='Portafolio HRP (López de Prado)', color='blue', linewidth=2.5)
         plt.plot(fechas_sim, historial_eq, label='Portafolio 1/N (Tradicional)', color='gray', linestyle='--', linewidth=2)
-        plt.title("HRP vs Equally Weighted Portfolio Backtest", fontsize=15, fontweight='bold')
+        plt.plot(fechas_sim, historial_sma, label='Portafolio 1/N + SMA-200 (Benchmark)', color='#10b981', linestyle='--', linewidth=2)
+        plt.title("HRP vs Equally Weighted vs SMA-200 Portfolio Backtest", fontsize=15, fontweight='bold')
         plt.ylabel("Capital en Dólares ($USD)")
         plt.grid(True, linestyle=':', alpha=0.6)
-        plt.legend()
+        plt.legend(fontsize=9)
         plt.tight_layout()
         plt.savefig("global_portfolio_hrp.png")
         print("✅ Gráfico guardado como 'global_portfolio_hrp.png'")
