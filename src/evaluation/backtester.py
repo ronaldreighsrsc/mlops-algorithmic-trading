@@ -175,6 +175,11 @@ class TripleBarrierBacktester:
         drawdown = (cum_series - running_max) / running_max
         mdd = drawdown.min()
         
+        # CVaR 95%
+        var_95 = np.percentile(sma_returns, 5) if len(sma_returns) > 5 else 0.0
+        cvar_95_arr = sma_returns[sma_returns <= var_95]
+        cvar_95 = cvar_95_arr.mean() if len(cvar_95_arr) > 0 else 0.0
+        
         # Generar timeline para el gráfico
         if 'time' in df_backtest.columns:
             times = pd.to_datetime(df_backtest['time'].values[1:])  # alineado con retornos
@@ -190,6 +195,7 @@ class TripleBarrierBacktester:
             'cagr': cagr,
             'sharpe': sharpe,
             'mdd': mdd,
+            'cvar_95': cvar_95,
             'label': sma_label,
             'sma_period': sma_period
         }
@@ -572,7 +578,7 @@ class TripleBarrierBacktester:
         return campeones, df_backtest if 'df_backtest' in locals() else None, sma_bench
 
 
-    def generate_html_report(self, campeones, sma_benchmark=None):
+    def generate_html_report(self, campeones, df_backtest=None, sma_benchmark=None):
         if not campeones:
             print("  No hay campeones para generar reporte.")
             return
@@ -580,6 +586,29 @@ class TripleBarrierBacktester:
         report_path = os.path.join(self.results_dir, f"backtest_report_{self.activo}.html")
         modo_str = "BILATERAL (Long + Short)" if self.bilateral else "LONG ONLY"
         primer = list(campeones.values())[0]
+
+        # Calcular métricas completas para Buy & Hold (Benchmark)
+        mkt_sharpe_str, mkt_mdd_str, mkt_cvar_str = "-", "-", "-"
+        if df_backtest is not None and not df_backtest.empty:
+            try:
+                mkt_closes = df_backtest['close'].values
+                mkt_returns = np.diff(mkt_closes) / mkt_closes[:-1]
+                mkt_std = np.std(mkt_returns)
+                mkt_sharpe = (np.mean(mkt_returns) / mkt_std) * np.sqrt(252) if mkt_std > 0 else 0.0
+                
+                mkt_cum = (1 + mkt_returns).cumprod()
+                cum_s = pd.Series(mkt_cum)
+                mkt_mdd = ((cum_s - cum_s.cummax()) / cum_s.cummax()).min()
+                
+                var_95 = np.percentile(mkt_returns, 5)
+                cvar_arr = mkt_returns[mkt_returns <= var_95]
+                mkt_cvar = cvar_arr.mean() if len(cvar_arr) > 0 else 0.0
+                
+                mkt_sharpe_str = f"{mkt_sharpe:.2f}"
+                mkt_mdd_str = f"{mkt_mdd:.2%}"
+                mkt_cvar_str = f"{mkt_cvar:.2%}"
+            except Exception:
+                pass
 
         html = f"""<!DOCTYPE html>
 <html lang="es">
@@ -650,19 +679,22 @@ class TripleBarrierBacktester:
                 <tr class="bench">
                     <td>BENCHMARK</td><td>Buy & Hold</td><td>-</td><td>0.00%</td>
                     <td class="{'positive' if primer['cagr_mkt'] >= 0 else 'negative'}">{primer['cagr_mkt']:.2%}</td>
-                    <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
+                    <td>-</td><td>-</td><td>-</td>
+                    <td>{mkt_sharpe_str}</td><td>-</td><td>-</td>
+                    <td>{mkt_mdd_str}</td><td>{mkt_cvar_str}</td>
                 </tr>
 """
         # Fila SMA-200 Benchmark (si está disponible)
         if sma_benchmark is not None:
             sma_cagr_cls = "positive" if sma_benchmark['cagr'] >= 0 else "negative"
+            sma_cvar_str = f"{sma_benchmark.get('cvar_95', 0.0):.2%}" if 'cvar_95' in sma_benchmark else "-"
             html += f"""
                 <tr class="bench">
                     <td>BENCHMARK</td><td>{sma_benchmark['label']} Trend Following</td><td>-</td><td>-</td>
                     <td class="{sma_cagr_cls}">{sma_benchmark['cagr']:.2%}</td>
                     <td>-</td><td>-</td><td>-</td>
                     <td>{sma_benchmark['sharpe']:.2f}</td><td>-</td><td>-</td>
-                    <td>{sma_benchmark['mdd']:.2%}</td><td>-</td>
+                    <td>{sma_benchmark['mdd']:.2%}</td><td>{sma_cvar_str}</td>
                 </tr>
 """
 
@@ -869,7 +901,7 @@ def main():
         backtester = TripleBarrierBacktester(activo, data_dir, results_dir, fast_mode=True)
         campeones, df_backtest, sma_benchmark = backtester.run_tournament(modelos, bancos)
         if campeones:
-            backtester.generate_html_report(campeones, sma_benchmark)
+            backtester.generate_html_report(campeones, df_backtest, sma_benchmark)
             backtester.plot_equity_curves(campeones, df_backtest, sma_benchmark)
             backtester.export_champion_config(campeones, sma_benchmark)
         else:
