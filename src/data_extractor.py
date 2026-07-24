@@ -18,6 +18,9 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 class DataExtractor:
     def __init__(self, connector: MT5Connector):
         self.connector = connector
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        self.raw_dir = os.path.join(base_dir, "data", "raw")
+
 
     def _fetch_macro_data(self, start_date: datetime, end_date: datetime) -> pd.DataFrame:
         logging.info("Descargando datos Macro (VIX, DXY, Yield10Y) usando yfinance...")
