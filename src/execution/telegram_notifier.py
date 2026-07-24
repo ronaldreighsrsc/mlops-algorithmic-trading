@@ -57,7 +57,7 @@ class TelegramNotifier:
         )
         self.send_message(msg)
 
-    def alert_trade_execution(self, symbol: str, volume: float, price: float, tp: float, sl: float, is_long: bool = True, account_balance: float = 500.0, risk_pct: float = 0.01):
+    def alert_trade_execution(self, symbol: str, volume: float, price: float, tp: float, sl: float, is_long: bool = True, account_balance: float = 500.0, risk_pct: float = 0.01, timeframe: str = "D1"):
         # Calcular riesgo en dolares y pips para referencia
         sl_pips = abs(price - sl) * 10000
         tp_pips = abs(tp - price) * 10000
@@ -81,7 +81,7 @@ class TelegramNotifier:
         direccion_str = "COMPRA (Long) 📈" if is_long else "VENTA (Short) 📉"
         
         msg = (
-            f"🚀 *SEÑAL DE {direccion_str} — {symbol}*\n"
+            f"🚀 *SEÑAL DE {direccion_str} — {symbol} [{timeframe}]*\n"
             f"━━━━━━━━━━━━━━━━━━━━\n"
             f"📌 Precio Entrada: `{price:.5f}`\n"
             f"🎯 Take Profit:    `{tp:.5f}` (+{tp_pips:.0f} pips)\n"
@@ -97,6 +97,7 @@ class TelegramNotifier:
             f"👉 _Poder de Trading:_ Escribe exactamente `$ {quantfury_trading_power:,.2f}` en Quantfury.{warning_leverage}"
         )
         self.send_message(msg)
+
 
     def alert_mlops_quarantine(self, symbol: str):
         msg = (

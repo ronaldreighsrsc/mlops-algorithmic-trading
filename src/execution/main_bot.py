@@ -409,10 +409,14 @@ class TradingBot:
             
             dynamic_risk_pct = self.risk_manager.risk_per_trade_pct * kelly_mult
             
-            # Enviar notificación Telegram (Trade)
+            # Enviar notificación Telegram (Trade) con timeframe explícito
+            tf_str_map = {mt5.TIMEFRAME_D1: "D1", mt5.TIMEFRAME_H4: "H4", mt5.TIMEFRAME_H1: "H1"}
+            tf_label = tf_str_map.get(self.timeframe, self.config.get("timeframe", "D1"))
+
             self.notifier.alert_trade_execution(
-                symbol=self.symbol, volume=lots, price=current_price, tp=tp_price, sl=sl_price, is_long=is_long, account_balance=account_balance, risk_pct=dynamic_risk_pct
+                symbol=self.symbol, volume=lots, price=current_price, tp=tp_price, sl=sl_price, is_long=is_long, account_balance=account_balance, risk_pct=dynamic_risk_pct, timeframe=tf_label
             )
+
             
             # 6. Enviar orden a MT5
             if self.symbol != "ECH":
