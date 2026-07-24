@@ -81,12 +81,13 @@ quant-trading-bot/
 
 El sistema está diseñado para fluir de manera secuencial. Cada paso depende del anterior.
 
-### 1. Extracción y Preprocesamiento de Datos Crudos
+### 1. Extracción y Preprocesamiento de Datos Crudos (Multi-Timeframe)
 ```bash
 python src/data_extractor.py
 python src/main_preprocessing.py
 ```
-*Se conecta a MT5 y Yahoo Finance para extraer desde el año 2000. Aplica FFD, EGARCH, Triple Barrera y guarda todo en `data/processed/`.*
+*Se conecta a MT5 y Yahoo Finance para extraer velas desde el año 2000 en múltiples temporalidades descorrelacionadas (`D1`, `H4`, `H1`). Aplica FFD, EGARCH, Triple Barrera y alineamiento `ffill` de exógenas macro (VIX, DXY, Yield10Y, Macro Chile), manteniendo compatibilidad retroactiva por defecto con `D1`.*
+
 
 ### 2. El "Retuning" Maestro (Generar Obreros con Optuna)
 ```bash

@@ -93,21 +93,32 @@ class DataExtractor:
         
         df['time'] = pd.to_datetime(df['time'], unit='s')
         df.set_index('time', inplace=True)
-        df.index = df.index.normalize() # Normalizar para hacer match correcto con yfinance
+        
+        # Para Daily (D1) normalizamos a las 00:00:00. Para H4/H1 preservamos la hora exacta.
+        if timeframe == mt5.TIMEFRAME_D1:
+            df.index = df.index.normalize()
+            
         df = df[['open', 'high', 'low', 'close', 'tick_volume', 'real_volume', 'spread']]
         
-        # Merge con datos macro
+        # Merge con datos macro (VIX, DXY, Yield10Y)
         macro_df = self._fetch_macro_data(start_date, end_date)
         if not macro_df.empty:
-            df = df.join(macro_df, how='left')
-            # Forward fill para dias donde forex opera pero mercados de bolsa/indices estan cerrados
-            if 'VIX_close' in df.columns:
-                df['VIX_close'] = df['VIX_close'].ffill()
-            if 'DXY_close' in df.columns:
-                df['DXY_close'] = df['DXY_close'].ffill()
-        
-        # Backward fill just in case the first rows are NaN
-        if 'VIX_close' in df.columns:
+            if timeframe == mt5.TIMEFRAME_D1:
+                df = df.join(macro_df, how='left')
+            else:
+                # Para H4/H1, unimos por fecha y propagamos forward-fill por barra intradía
+                df['date_key'] = df.index.date
+                macro_df_temp = macro_df.copy()
+                macro_df_temp['date_key'] = macro_df_temp.index.date
+                macro_df_temp = macro_df_temp.drop_duplicates(subset=['date_key'])
+                df = df.reset_index().merge(macro_df_temp, on='date_key', how='left').set_index('time')
+                df.drop(columns=['date_key'], inplace=True, errors='ignore')
+
+            # Forward fill para feriados o barras intradía
+            for macro_col in ['VIX_close', 'DXY_close', 'Yield10Y']:
+                if macro_col in df.columns:
+                    df[macro_col] = df[macro_col].ffill().bfill()
+
             df['VIX_close'] = df['VIX_close'].bfill()
         if 'DXY_close' in df.columns:
             df['DXY_close'] = df['DXY_close'].bfill()

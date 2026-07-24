@@ -48,12 +48,19 @@ class TradingBot:
         # Conectores y Motores
         self.connector = MT5Connector()
         self.engine = ExecutionEngine(self.connector)
+        
+        # Mapeo dinámico de Magic Number por símbolo y timeframe en MT5
+        tf_code = {mt5.TIMEFRAME_D1: 1, mt5.TIMEFRAME_H4: 4, mt5.TIMEFRAME_H1: 10}.get(self.timeframe, 1)
+        sym_code = abs(hash(self.symbol)) % 1000
+        self.engine.magic_number = 100000 + sym_code * 10 + tf_code
+
         self.risk_manager = RiskManager(
             risk_per_trade_pct=0.025,
             k_up=config["k_up"],
             k_down=config["k_down"]
         )
         self.notifier = TelegramNotifier()
+
         
         # Preprocesadores
         self.tech_eng = TechnicalFeatureEngineer(target_price_col='close')
@@ -602,27 +609,40 @@ if __name__ == "__main__":
     results_dir = os.path.join(base_dir, "results")
     models_dir = os.path.join(results_dir, "saved_models")
     
-    activos = ["EURUSD", "SP500", "Oro", "ECH"]
+    # Buscar todos los JSON de campeones en results/ (soporta multi-timeframe y retrocompatibilidad D1)
+    import glob
+    campeon_files = glob.glob(os.path.join(results_dir, "campeon_*.json"))
     bots_activos = []
     
-    for symbol in activos:
-        json_path = os.path.join(results_dir, f"campeon_{symbol}.json")
-        if not os.path.exists(json_path):
-            logging.warning(f"Omitiendo {symbol} porque no se encontró configuración del campeon (Alpha Positivo) en: {json_path}")
-            continue
-            
-        with open(json_path, 'r', encoding='utf-8') as f:
-            config = json.load(f)
-            
+    tf_map = {
+        "D1": mt5.TIMEFRAME_D1,
+        "H4": mt5.TIMEFRAME_H4,
+        "H1": mt5.TIMEFRAME_H1
+    }
 
+    if not campeon_files:
+        logging.warning("No se encontraron archivos de campeones en results/.")
+    else:
+        for json_path in campeon_files:
+            filename = os.path.basename(json_path)
+            symbol_raw = filename.replace("campeon_", "").replace(".json", "")
             
-        model_path = os.path.join(models_dir, config["model_file"])
-        if os.path.exists(model_path):
-            logging.info(f"Registrando bot para {symbol} -> Campeon: {config['model_type']} ({config['banco']}) Umbral: >{config['confidence_threshold']:.0%}")
-            bot = TradingBot(symbol=symbol, timeframe=mt5.TIMEFRAME_D1, config=config, models_dir=models_dir)
-            bots_activos.append(bot)
-        else:
-            logging.error(f"Falta el archivo binario del modelo {model_path} para {symbol}.")
+            with open(json_path, 'r', encoding='utf-8') as f:
+                config = json.load(f)
+
+            # Obtener el timeframe de la configuración o fallback a D1
+            tf_str = config.get("timeframe", "D1")
+            timeframe = tf_map.get(tf_str, mt5.TIMEFRAME_D1)
+            symbol = config.get("activo", symbol_raw.split("_")[0])
+
+            model_path = os.path.join(models_dir, config["model_file"])
+            if os.path.exists(model_path):
+                logging.info(f"Registrando bot para {symbol} [{tf_str}] -> Campeón: {config['model_type']} ({config['banco']}) Umbral: >{config['confidence_threshold']:.0%}")
+                bot = TradingBot(symbol=symbol, timeframe=timeframe, config=config, models_dir=models_dir)
+                bots_activos.append(bot)
+            else:
+                logging.error(f"Falta el archivo binario del modelo {model_path} para {symbol} [{tf_str}].")
+
             
     if not bots_activos:
         logging.error("No hay bots configurados o no se encontraron los modelos. Abortando.")
