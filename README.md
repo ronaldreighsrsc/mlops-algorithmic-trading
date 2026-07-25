@@ -143,23 +143,26 @@ python src/main_training.py
 *El script más pesado. Ejecútalo 1 o 2 veces al año. Pone a competir a decenas de arquitecturas (XGBoost, RandomForest, LSTM, BiLSTM, ARIMA-LSTM, LSTM-RF) utilizando **Optimización Bayesiana (Optuna TPE Sampler + Purged CV Pruning)**. A diferencia de las búsquedas aleatorias tradicionales, Optuna aprende del historial de hiperparámetros y poda ejecuciones poco prometedoras rápidamente, reduciendo los tiempos de cómputo en un 40-60%. Emite archivos `.npy` con predicciones puras y `.pkl` con modelos entrenados en `results/`.*
 
 
-### 3. Simulación Financiera y Entrenamiento MLOps (`portfolio_backtester.py`)
+### 3. Backtest de Alpha por Activo (`alpha_backtester.py`)
+```bash
+python src/evaluation/alpha_backtester.py
+```
+*Evalúa el **Alpha Puro** de cada modelo individualmente por activo. Aplica el **Pipeline Unificado de 2 Pasos** (Gatekeepers + Composite Score), genera los reportes HTML (`backtest_report_*.html`), visualiza las curvas de equidad por activo y exporta los archivos `campeon_*.json`.*
+
+### 3b. Backtest de Portafolio Multi-Activo & HRP (`portfolio_backtester.py`)
 ```bash
 python src/evaluation/portfolio_backtester.py
 ```
-*Este es el corazón analítico del sistema. Ejecuta el Torneo Financiero completo con **Kelly Dinámico** y **HRP**:*
+*El corazón cuantitativo de gestión de capital. Toma los campeones elegidos por el Alpha Backtester y ejecuta la **Simulación de Billetera Real**: aplica Apalancamiento Kelly Dinámico, Presupuesto Montecarlo 95% MDD, calcula la asignación de capital **HRP (López de Prado)** y exporta `hrp_weights.json` listo para despliegue en AWS.*
 
-#### 🔄 Modos de Ejecución (`fast_mode`):
-- **Re-entrenamiento MLOps Anual (`fast_mode=False`):** (~1-2 horas). Entrena los modelos de detección de anomalías (HMM y LSTM Autoencoder) desde cero para cada combinación de activo/modelo/banco sobre los datos In-Sample. Se ejecuta **1 o 2 veces al año** y guarda los monitores entrenados en `results/mlops_monitors/`.
-- **Evaluación Rápida (`fast_mode=True`):** (~2 minutos - **Modo por defecto**). Carga los Autoencoders y HMMs pre-entrenados desde `results/mlops_monitors/` en segundos para simular el capital en USD, calcular el **HRP** y generar los archivos de campeones.
+#### 🔄 Modos de Ejecución MLOps (`FAST_MODE` en `portfolio_backtester.py`):
+- **Re-entrenamiento MLOps Anual (`FAST_MODE = False`):** (~1-2 horas). Entrena los modelos de anomalías (HMM y LSTM Autoencoder) desde cero para cada combinación en `results/mlops_monitors/`.
+- **Evaluación Rápida (`FAST_MODE = True`):** (~2 minutos - **Modo por defecto**). Carga monitores pre-entrenados en segundos, calcula el HRP y actualiza la billetera real.
 
 > 💡 **Orden de Ejecución Recomendado:**
 > 1. `main_training.py` (Genera predicciones `.npy` de los modelos base).
-> 2. `portfolio_backtester.py` con `FAST_MODE = False` (Entrena y guarda los monitores MLOps).
-> 3. `portfolio_backtester.py` con `FAST_MODE = True` (Evaluación diaria/semanal rápida y exportación HRP).
-
-### 3b. Motor Analítico Base (`backtester.py`)
-*El módulo `backtester.py` actúa como la librería/engine POO interna (`TripleBarrierBacktester`). Es utilizado automáticamente por `portfolio_backtester.py` para calcular el Torneo Financiero por activo, los reportes HTML y las curvas de equidad.*
+> 2. `alpha_backtester.py` (Torneo y selección de Alpha por activo).
+> 3. `portfolio_backtester.py` (Simulación de billetera en USD, Kelly Dinámico y HRP global).
 
 ### 3c. Auditoría de Robustez y PBO (`cpcv_auditor.py`)
 ```bash

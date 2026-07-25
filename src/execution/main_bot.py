@@ -498,7 +498,7 @@ class TradingBot:
         if base_dir not in sys.path:
             sys.path.insert(0, base_dir)
             
-        from src.evaluation.backtester import TripleBarrierBacktester
+        from src.evaluation.alpha_backtester import TripleBarrierBacktester
         
         eval_window = 300
         if len(df_proc) < eval_window:

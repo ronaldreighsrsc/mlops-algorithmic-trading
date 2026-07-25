@@ -5,7 +5,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from evaluation.backtester import TripleBarrierBacktester
+from evaluation.alpha_backtester import TripleBarrierBacktester
 
 def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trade=0.01, fast_mode=True):
     print(f"\n💰 INICIANDO PORTFOLIO BACKTESTER PARA {activo} 💰")
