@@ -394,6 +394,7 @@ class TripleBarrierBacktester:
         for modelo in modelos:
             mejor_alpha = -np.inf
             campeon_actual = None
+            candidatos_para_modelo = []
             
             for banco in bancos:
                 file_name = os.path.join(self.results_dir, f'probs_{modelo.lower()}_{banco.lower()}_{self.activo}.npy')
@@ -443,7 +444,7 @@ class TripleBarrierBacktester:
                             
                         _, _, train_rolling_metrics = self.simulate_trades(df_train, train_probs, is_training_phase=True, macro_cols=macro_cols)
                         
-                if len(train_rolling_metrics) > 10:
+                        if len(train_rolling_metrics) > 10:
                             from models.anomaly_detector import StrategyLSTMAutoencoder
                             hybrid_monitor.lstm_model = StrategyLSTMAutoencoder(epochs=50, batch_size=4)
                             X_train = np.array(train_rolling_metrics)
