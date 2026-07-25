@@ -300,17 +300,19 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
 
 
 if __name__ == "__main__":
-    # Configura aquí tu cuenta de banco y tu riesgo!
-    CAPITAL = 10000.0       # USD en tu broker
-    RIESGO_PCT = 0.025       
+    # ==============================================================================
+    # CONFIGURACIÓN MAESTRA DE EVALUACIÓN Y PORTAFOLIO GLOBAL
+    # ==============================================================================
+    CAPITAL = 10000.0        # USD en tu broker
+    RIESGO_PCT = 0.025       # 2.5% riesgo base por trade
+    FAST_MODE = True         # True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
     
-    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"] #["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
 
-    
     # 1. Simulación Individual (Silos)
     series_retornos = {}
     for activo_actual in activos:
-        serie_campeon = simulate_portfolio(activo=activo_actual, capital_inicial=CAPITAL, riesgo_por_trade=RIESGO_PCT, fast_mode=True)
+        serie_campeon = simulate_portfolio(activo=activo_actual, capital_inicial=CAPITAL, riesgo_por_trade=RIESGO_PCT, fast_mode=FAST_MODE)
         if serie_campeon is not None:
             series_retornos[activo_actual] = serie_campeon
         

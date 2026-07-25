@@ -899,29 +899,11 @@ class TripleBarrierBacktester:
 
 
 
-def main():
-    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-    data_dir = os.path.join(base_dir, "data")
-    results_dir = os.path.join(base_dir, "results")
-    
-    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"] #["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
-
-    modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
-    RIESGO_PCT = 0.025
-    
-    from main_training import get_bancos_por_activo
-    
-    for activo in activos:
-        bancos = list(get_bancos_por_activo(activo).keys())
-        backtester = TripleBarrierBacktester(activo, data_dir, results_dir, fast_mode=True)
-        campeones, df_backtest, sma_benchmark = backtester.run_tournament(modelos, bancos)
-        if campeones:
-            backtester.generate_html_report(campeones, df_backtest, sma_benchmark)
-            backtester.plot_equity_curves(campeones, df_backtest, sma_benchmark)
-            backtester.export_champion_config(campeones, sma_benchmark)
-        else:
-            print(f"No hay predicciones guardadas para {activo} aún.")
-
-
 if __name__ == "__main__":
-    main()
+    print("==========================================================================")
+    print("💡 ENGINE DE EVALUACIÓN INDIVIDUAL TRIPLE BARRIER (POO Engine)")
+    print("==========================================================================")
+    print("Este módulo es el motor analítico de evaluación por activo.")
+    print("Para ejecutar la simulación completa (Torneo, Campeones HRP y AWS), ejecuta:")
+    print("👉 python src/evaluation/portfolio_backtester.py")
+    print("==========================================================================")
