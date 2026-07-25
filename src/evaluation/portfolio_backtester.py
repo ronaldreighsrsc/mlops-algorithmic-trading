@@ -418,6 +418,9 @@ if __name__ == "__main__":
             fechas_sim.append(df_returns.index[i])
             
         # Métricas avanzadas para la cartera HRP y Benchmarks
+        dias_test = (fechas_sim[-1] - fechas_sim[0]).days if isinstance(fechas_sim[0], pd.Timestamp) else 365.25 * 3
+        anios_test = max(0.1, dias_test / 365.25)
+
         def _calc_metrics(hist_cap):
             arr = np.array(hist_cap)
             rets = np.diff(arr) / arr[:-1]
@@ -426,14 +429,16 @@ if __name__ == "__main__":
             s = pd.Series(arr)
             mdd = ((s - s.cummax()) / s.cummax()).min()
             roi = (arr[-1] / arr[0]) - 1
-            return roi, sharpe, mdd
+            cagr = (1 + roi)**(1 / anios_test) - 1 if roi > -1.0 else -1.0
+            starr = cagr / abs(mdd) if abs(mdd) > 0 else 0.0
+            return roi, cagr, sharpe, starr, mdd
 
-        roi_hrp, sharpe_hrp, mdd_hrp = _calc_metrics(historial_hrp)
-        roi_eq, sharpe_eq, mdd_eq = _calc_metrics(historial_eq)
-        roi_sma, sharpe_sma, mdd_sma = _calc_metrics(historial_sma)
+        roi_hrp, cagr_hrp, sharpe_hrp, starr_hrp, mdd_hrp = _calc_metrics(historial_hrp)
+        roi_eq, cagr_eq, sharpe_eq, starr_eq, mdd_eq = _calc_metrics(historial_eq)
+        roi_sma, cagr_sma, sharpe_sma, starr_sma, mdd_sma = _calc_metrics(historial_sma)
 
         # Cargar SP500 Buy & Hold puro para comparativa directa
-        sp500_roi_str, sp500_sharpe_str, sp500_mdd_str = "19.12%", "1.21", "-18.99%"
+        sp500_roi_str, sp500_cagr_str, sp500_sharpe_str, sp500_starr_str, sp500_mdd_str = "19.12%", "6.0%", "1.21", "0.32", "-18.99%"
         try:
             sp_path = os.path.join(data_dir, "raw", "SP500_daily.csv")
             if os.path.exists(sp_path):
@@ -449,21 +454,25 @@ if __name__ == "__main__":
                         sp_s = pd.Series((1 + sp_rets).cumprod())
                         sp_mdd = ((sp_s - sp_s.cummax()) / sp_s.cummax()).min()
                         sp_roi = (sp_closes[-1] / sp_closes[0]) - 1
+                        sp_cagr = (1 + sp_roi)**(1 / anios_test) - 1 if sp_roi > -1.0 else -1.0
+                        sp_starr = sp_cagr / abs(sp_mdd) if abs(sp_mdd) > 0 else 0.0
                         sp500_roi_str = f"{sp_roi:.2%}"
+                        sp500_cagr_str = f"{sp_cagr:.2%}"
                         sp500_sharpe_str = f"{sp_sharpe:.2f}"
+                        sp500_starr_str = f"{sp_starr:.2f}"
                         sp500_mdd_str = f"{sp_mdd:.2%}"
         except Exception:
             pass
 
         print(f"\n📊 RESULTADOS COMPARATIVOS GLOBAL PORTFOLIO (Rebalanceo Mensual)")
-        print(f"{'='*75}")
-        print(f"{'ESTRATEGIA / BENCHMARK':<32} | {'ROI TOTAL':<10} | {'SHARPE':<8} | {'MAX DRAWDOWN':<12}")
-        print(f"{'-'*75}")
-        print(f"{'Portafolio HRP (Tu Bot ML)':<32} | {roi_hrp:>10.2%} | {sharpe_hrp:>8.2f} | {mdd_hrp:>12.2%}")
-        print(f"{'Indexado 100% SP500 (Buy & Hold)':<32} | {sp500_roi_str:>10} | {sp500_sharpe_str:>8} | {sp500_mdd_str:>12}")
-        print(f"{'Portafolio 1/N (Mercado Cesta)':<32} | {roi_eq:>10.2%} | {sharpe_eq:>8.2f} | {mdd_eq:>12.2%}")
-        print(f"{'Portafolio 1/N + SMA-200':<32} | {roi_sma:>10.2%} | {sharpe_sma:>8.2f} | {mdd_sma:>12.2%}")
-        print(f"{'='*75}\n")
+        print(f"{'='*95}")
+        print(f"{'ESTRATEGIA / BENCHMARK':<32} | {'ROI TOTAL':<10} | {'CAGR':<8} | {'SHARPE':<8} | {'STARR':<8} | {'MAX DRAWDOWN':<12}")
+        print(f"{'-'*95}")
+        print(f"{'Portafolio HRP (Tu Bot ML)':<32} | {roi_hrp:>10.2%} | {cagr_hrp:>8.2%} | {sharpe_hrp:>8.2f} | {starr_hrp:>8.2f} | {mdd_hrp:>12.2%}")
+        print(f"{'Indexado 100% SP500 (Buy & Hold)':<32} | {sp500_roi_str:>10} | {sp500_cagr_str:>8} | {sp500_sharpe_str:>8} | {sp500_starr_str:>8} | {sp500_mdd_str:>12}")
+        print(f"{'Portafolio 1/N (Mercado Cesta)':<32} | {roi_eq:>10.2%} | {cagr_eq:>8.2%} | {sharpe_eq:>8.2f} | {starr_eq:>8.2f} | {mdd_eq:>12.2%}")
+        print(f"{'Portafolio 1/N + SMA-200':<32} | {roi_sma:>10.2%} | {cagr_sma:>8.2%} | {sharpe_sma:>8.2f} | {starr_sma:>8.2f} | {mdd_sma:>12.2%}")
+        print(f"{'='*95}\n")
         
         plt.figure(figsize=(12, 6))
         plt.plot(fechas_sim, historial_hrp, label=f'Portafolio HRP (Tu Bot ML) - ROI: {roi_hrp:.2%} | Sharpe: {sharpe_hrp:.2f}', color='blue', linewidth=2.5)
