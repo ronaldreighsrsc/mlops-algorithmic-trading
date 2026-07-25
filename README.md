@@ -155,14 +155,11 @@ python src/evaluation/portfolio_backtester.py
 
 > 💡 **Orden de Ejecución Recomendado:**
 > 1. `main_training.py` (Genera predicciones `.npy` de los modelos base).
-> 2. `portfolio_backtester.py` con `fast_mode=False` (Entrena y guarda los monitores MLOps).
-> 3. `portfolio_backtester.py` con `fast_mode=True` o `backtester.py` (Evaluación diaria/semanal rápida).
+> 2. `portfolio_backtester.py` con `FAST_MODE = False` (Entrena y guarda los monitores MLOps).
+> 3. `portfolio_backtester.py` con `FAST_MODE = True` (Evaluación diaria/semanal rápida y exportación HRP).
 
-### 3b. Backtester Rápido Independiente (`backtester.py`)
-```bash
-python src/evaluation/backtester.py
-```
-*Si solo quieres regenerar los reportes HTML, los gráficos de curva de equidad o exportar la configuración del campeón sin pasar por la simulación de billetera en USD, corre el backtester independiente (`fast_mode=True` por defecto).*
+### 3b. Motor Analítico Base (`backtester.py`)
+*El módulo `backtester.py` actúa como la librería/engine POO interna (`TripleBarrierBacktester`). Es utilizado automáticamente por `portfolio_backtester.py` para calcular el Torneo Financiero por activo, los reportes HTML y las curvas de equidad.*
 
 ### 3c. Auditoría de Robustez y PBO (`cpcv_auditor.py`)
 ```bash
