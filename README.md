@@ -57,6 +57,13 @@ En la industria cuantitativa, el estándar de validación más riguroso para un 
 1. **`backtester.py`** — Fila extra en la tabla HTML (`backtest_report_*.html`) y línea verde punteada en `equity_curve_*.png`.
 2. **`portfolio_backtester.py`** — Línea verde en el gráfico individual de cada activo. Tercera línea "1/N + SMA-200" en el gráfico global HRP.
 
+> [!IMPORTANT]
+> **¿El Bot opera con SMA-200 en Producción?** NO. En producción (`main_bot.py`), el bot ejecuta exclusivamente las señales del **Modelo Campeón Predictivo** (BiLSTM, XGBoost, etc.) filtradas por el **Autoencoder MLOps** y el **Kelly Dinámico**. La SMA-200 es únicamente una **métrica pasiva de comparación (Benchmark)** para auditar si el modelo de Machine Learning le gana a la tendencia simple.
+>
+> **¿Por qué `export_to_aws.py` empaqueta los CSVs de `data/raw/`?** Porque cada mañana `main_bot.py` utiliza las velas históricas recientes para 2 tareas críticas en AWS:
+> 1. **Daily Fast-Retrain:** Re-calibra los pesos matemáticos del modelo con las últimas velas.
+> 2. **Shadow Journal:** Corre una simulación interna de 300 días para evaluar el estado del *Autoencoder* y verificar si el bot tiene permiso de operar o si debe permanecer en *Cuarentena*.
+
 ### 🏆 Criterios de Selección de Campeones para Producción
 Para que un modelo sea exportado a `campeon_*.json` y desplegado en vivo, debe superar 3 filtros secuenciales:
 1. **Estado VIVO (`is_dead == False`)**: No debe haber sido eliminado por el Hard Kill-Switch de Drawdown (-15% sin apalancamiento).
@@ -204,8 +211,28 @@ Abre CMD como Administrador y crea la tarea para que lance el archivo `.bat` jus
 ```cmd
 schtasks /create /tn "QuantBot_Trading" /tr "C:\Users\Administrator\Desktop\quant-trading-bot\start_bot.bat" /sc onlogon /ru "Administrator" /rl highest /f
 ```
-> [!IMPORTANT]
-> Observa el parámetro `/sc onlogon` (Al iniciar sesión). Usar `/sc onstart` (Al encender) ejecutará el bot oculto en el fondo, impidiéndote ver los gráficos de MT5 e inestabilizando la conexión Python-MT5.
+## 📓 Auditoría de Producción en Vivo (`live_evaluator.py`)
+
+El sistema incluye un módulo de auditoría en tiempo real para evaluar el rendimiento real en vivo tanto de MetaTrader 5 (MT5) como de las operaciones manuales en Quantfury (`ECH`):
+
+### 1. Diario de Trading en Vivo (`results/live_signal_journal.csv`)
+Cada vez que `main_bot.py` detecta una vela nueva y evalúa probabilidades, registra una fila permanente con:
+- Fecha y hora exacta.
+- Símbolo, Timeframe y Modelo Predictivo.
+- Probabilidad de la señal y Umbral de Confianza.
+- Dirección (COMPRA / VENTA / CASH) y Estado de Ejecución.
+- Precios de Entrada, TP, SL, Tamaño del Lote y Riesgo en USD/%.
+
+### 2. Evaluador de Rendimiento en Vivo (`src/evaluation/live_evaluator.py`)
+Para auditar las métricas financieras en caliente sin depender del broker:
+```bash
+python src/evaluation/live_evaluator.py
+```
+Genera automáticamente el reporte HTML interactivo en `results/live_production_report.html` con:
+- Capital Actual y ROI Total en Vivo.
+- Sharpe Ratio en Vivo y Max Drawdown Real.
+- Win Rate real de operaciones cerradas.
+- Tabla detallada del historial de ejecuciones.
 
 ## 🧪 Tests Unitarios (MLOps)
 
