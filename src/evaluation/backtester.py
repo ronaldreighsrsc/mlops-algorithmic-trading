@@ -797,8 +797,19 @@ class TripleBarrierBacktester:
         if not campeones:
             return
             
-        # Filtrar campeones vivos y con alpha > 0
-        campeones_validos = {mod: data for mod, data in campeones.items() if not data.get('is_dead', False) and data['alpha'] > 0}
+        # Filtrar campeones VIVOS que cumplan ALFA > 0 O SHARPE >= 1.2 (Grado Institucional en Índices Alcistas)
+        campeones_validos = {}
+        for mod, data in campeones.items():
+            if data.get('is_dead', False):
+                continue
+            
+            is_alpha_viable = data['alpha'] > 0
+            is_sharpe_viable = (data['metrics'].get('Sharpe', 0.0) >= 1.2 and 
+                                data.get('cagr_est', 0.0) > 0.05 and 
+                                data['metrics'].get('MDD', 0.0) > -0.25)
+            
+            if is_alpha_viable or is_sharpe_viable:
+                campeones_validos[mod] = data
         
         # Filtro 3: Superar al SMA-200 (si está disponible)
         if sma_benchmark is not None and campeones_validos:
@@ -810,7 +821,7 @@ class TripleBarrierBacktester:
                 print(f"  📏 Filtro SMA-200: {eliminados} campeón(es) eliminado(s) por no superar CAGR del {sma_benchmark['label']} ({sma_cagr:.2%})")
         
         if not campeones_validos:
-            print(f"  ⚠️ No hay campeones viables (Alpha > 0, Vivos y > SMA-200) para {self.activo}. No se exportará configuración para producción.")
+            print(f"  ⚠️ No hay campeones viables (Vivos, con Alpha > 0 o Sharpe >= 1.2, y > SMA-200) para {self.activo}. No se exportará configuración para producción.")
             return
             
         mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['alpha'])

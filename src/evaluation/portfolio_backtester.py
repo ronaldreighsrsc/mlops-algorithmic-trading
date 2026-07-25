@@ -30,8 +30,19 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
         print("❌ No se encontraron modelos campeones en caché. Ejecuta main_training.py primero.")
         return
         
-    # 2. Elegir el mejor modelo (El Campeón de Campeones con Alpha Positivo, Vivo y > SMA-200)
-    campeones_validos = {mod: data for mod, data in campeones.items() if not data.get('is_dead', False) and data['alpha'] > 0}
+    # 2. Elegir el mejor modelo (VIVO + Alpha > 0 O Sharpe >= 1.2 Institucional + > SMA-200)
+    campeones_validos = {}
+    for mod, data in campeones.items():
+        if data.get('is_dead', False):
+            continue
+        
+        is_alpha_viable = data['alpha'] > 0
+        is_sharpe_viable = (data['metrics'].get('Sharpe', 0.0) >= 1.2 and 
+                            data.get('cagr_est', 0.0) > 0.05 and 
+                            data['metrics'].get('MDD', 0.0) > -0.25)
+        
+        if is_alpha_viable or is_sharpe_viable:
+            campeones_validos[mod] = data
     
     # Filtro 3: Superar al SMA-200 (si está disponible)
     if sma_benchmark is not None and campeones_validos:
