@@ -44,20 +44,34 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
         if is_alpha_viable or is_sharpe_viable:
             campeones_validos[mod] = data
     
-    # Filtro 3: Superar al SMA-200 (si está disponible)
+    # Filtro 3: Evaluación de Viabilidad vs SMA-200 (Superar CAGR O Superar Sharpe Institucional)
     if sma_benchmark is not None and campeones_validos:
-        sma_cagr = sma_benchmark['cagr']
+        sma_cagr = sma_benchmark.get('cagr', 0.0)
+        sma_sharpe = sma_benchmark.get('sharpe', 1.0)
         antes = len(campeones_validos)
-        campeones_validos = {mod: data for mod, data in campeones_validos.items() if data['cagr_est'] > sma_cagr}
-        eliminados = antes - len(campeones_validos)
+        
+        # Sobreviven si superan el CAGR de la SMA-200 O si tienen un Sharpe superior a la SMA-200 con retorno positivo
+        campeones_filtrados = {}
+        for mod, data in campeones_validos.items():
+            mod_sharpe = data['metrics'].get('Sharpe', 0.0)
+            if data['cagr_est'] > sma_cagr or (mod_sharpe > sma_sharpe and data['cagr_est'] > 0.02):
+                campeones_filtrados[mod] = data
+                
+        eliminados = antes - len(campeones_filtrados)
         if eliminados > 0:
-            print(f"  📏 Filtro SMA-200: {eliminados} campeón(es) eliminado(s) por no superar CAGR del {sma_benchmark['label']} ({sma_cagr:.2%})")
+            print(f"  📏 Filtro SMA-200: {eliminados} campeón(es) eliminado(s) por no superar CAGR ({sma_cagr:.2%}) ni Sharpe ({sma_sharpe:.2f}) del Benchmark.")
+        campeones_validos = campeones_filtrados
     
     if not campeones_validos:
-        print(f"❌ No hay campeones viables (Alpha > 0, Vivos y > SMA-200) para {activo}.")
+        print(f"❌ No hay campeones viables (Alpha > 0 O Sharpe > SMA-200) para {activo}.")
         return None
 
-    mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['alpha'])
+    # Criterio de Selección: Si hay modelos con Alpha > 0 se prioriza Alpha; de lo contrario se prioriza el Sharpe Ratio supremo.
+    modelos_con_alpha = [k for k, v in campeones_validos.items() if v['alpha'] > 0]
+    if modelos_con_alpha:
+        mejor_modelo = max(modelos_con_alpha, key=lambda k: campeones_validos[k]['alpha'])
+    else:
+        mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['metrics'].get('Sharpe', 0.0))
     data = campeones_validos[mejor_modelo]
 
     # Presupuesto de riesgo dinámico por activo basado en Montecarlo (fallback al riesgo base)
@@ -279,7 +293,7 @@ if __name__ == "__main__":
     CAPITAL = 10000.0       # USD en tu broker
     RIESGO_PCT = 0.025       
     
-    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+    activos = ["EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4"] #["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
 
     
     # 1. Simulación Individual (Silos)
