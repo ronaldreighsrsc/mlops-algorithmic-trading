@@ -466,6 +466,8 @@ class TripleBarrierBacktester:
                         
                         if 'time' in df_backtest.columns:
                             trade_results['exit_time'] = pd.to_datetime(df_backtest['time'].iloc[trade_results['idx']].values)
+                        elif df_backtest.index.name == 'time':
+                            trade_results['exit_time'] = pd.to_datetime(df_backtest.index[trade_results['idx']])
                         else:
                             trade_results['exit_time'] = trade_results['idx'] # Fallback
                             
