@@ -149,51 +149,50 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     plt.figure(figsize=(12, 6))
     plt.plot(fechas, historial_capital, label=f'Equidad con Kelly Dinámico (Base {riesgo_por_trade*100}%)', color='green', linewidth=2.5)
     
-    # Benchmark SMA-200 (Long-Cash) sobre el precio crudo del activo
+    # Benchmark SMA-200 (Long-Cash) sobre el precio crudo del activo (con Warmup / Shadow Journal)
     try:
-        # Determinar periodo SMA según temporalidad
-        if '_H4' in activo:
-            sma_period = 1200
-        elif '_H1' in activo:
-            sma_period = 4800
-        else:
-            sma_period = 200
-        
+        sma_period = 1200 if '_H4' in activo else (4800 if '_H1' in activo else 200)
         raw_path = os.path.join(data_dir, "raw", f"{activo}_daily.csv")
+        if not os.path.exists(raw_path) and '_' in activo:
+            # Fallback a nombre base si es necesario
+            base_act = activo.split('_')[0]
+            raw_path = os.path.join(data_dir, "raw", f"{base_act}_daily.csv")
+            
         if os.path.exists(raw_path):
             df_raw = pd.read_csv(raw_path)
             if 'time' in df_raw.columns:
                 df_raw['time'] = pd.to_datetime(df_raw['time'])
+                df_raw.sort_values('time', inplace=True)
+            
             raw_closes = df_raw['close'].values
             
-            if len(raw_closes) >= sma_period + 1:
-                sma_vals = pd.Series(raw_closes).rolling(window=sma_period).mean().values
-                # Simular capital SMA-200
-                capital_sma = capital_inicial
-                historial_sma = [capital_inicial]
-                fechas_sma = [fechas[0]]
-                raw_returns = np.diff(raw_closes) / raw_closes[:-1]
+            if len(raw_closes) >= sma_period:
+                # Pre-calcular SMA sobre toda la serie historica (Warmup / Shadow Journal)
+                sma_series = pd.Series(raw_closes).rolling(window=sma_period).mean().values
+                df_raw['sma'] = sma_series
                 
-                # Alinear con el periodo de test (usar los últimos N retornos)
-                n_test_period = len(fechas) - 1  # número de trades
-                start_idx = max(0, len(raw_returns) - n_test_period)
+                # Filtrar solo el periodo del test set usando las fechas de inicio y fin
+                t_start, t_end = fechas[0], fechas[-1]
+                df_raw_test = df_raw[(df_raw['time'] >= t_start) & (df_raw['time'] <= t_end)].copy()
                 
-                for t in range(start_idx, len(raw_returns)):
-                    if not np.isnan(sma_vals[t]) and sma_vals[t] > 0 and raw_closes[t] > sma_vals[t]:
-                        capital_sma *= (1 + raw_returns[t] * (riesgo_por_trade / 0.015))  # misma escala de apalancamiento
-                    # Si close <= SMA: CASH (no gana ni pierde)
-                    historial_sma.append(capital_sma)
-                    if 'time' in df_raw.columns and t + 1 < len(df_raw):
-                        fechas_sma.append(df_raw['time'].iloc[t + 1])
-                    else:
-                        fechas_sma.append(fechas_sma[-1])
-                
-                sma_label = f"SMA-{sma_period}" if sma_period != 200 else "SMA-200"
-                plt.plot(fechas_sma[:len(historial_sma)], historial_sma, 
-                         label=f'{sma_label} Trend Following (Benchmark)', 
-                         color='#10b981', linewidth=2.0, linestyle='--')
+                if not df_raw_test.empty:
+                    df_raw_test['ret'] = df_raw_test['close'].pct_change().fillna(0.0)
+                    
+                    # Regla Long-Cash: si close > sma → ret, sino → 0.0
+                    df_raw_test['sma_ret'] = np.where(
+                        (~df_raw_test['sma'].isna()) & (df_raw_test['close'] > df_raw_test['sma']),
+                        df_raw_test['ret'] * (riesgo_base_activo / 0.015), # misma escala de riesgo
+                        0.0
+                    )
+                    
+                    df_raw_test['capital_sma'] = capital_inicial * (1 + df_raw_test['sma_ret']).cumprod()
+                    
+                    sma_label = f"SMA-{sma_period}" if sma_period != 200 else "SMA-200"
+                    plt.plot(df_raw_test['time'], df_raw_test['capital_sma'], 
+                             label=f'{sma_label} Trend Following (Benchmark)', 
+                             color='#10b981', linewidth=2.0, linestyle='--')
     except Exception as e:
-        print(f"  ⚠️ SMA Benchmark no disponible: {e}")
+        print(f"  ⚠️ SMA Benchmark no disponible para {activo}: {e}")
     
     plt.title(f"Simulador de Billetera Real (Portfolio Backtest) - {activo}", fontsize=15, fontweight='bold')
     plt.ylabel("Capital en Dólares ($USD)", fontsize=12)
@@ -334,18 +333,20 @@ if __name__ == "__main__":
             try:
                 sma_period = 1200 if '_H4' in act else (4800 if '_H1' in act else 200)
                 raw_path = os.path.join(data_dir, "raw", f"{act}_daily.csv")
+                if not os.path.exists(raw_path) and '_' in act:
+                    base_act = act.split('_')[0]
+                    raw_path = os.path.join(data_dir, "raw", f"{base_act}_daily.csv")
+                    
                 if os.path.exists(raw_path):
                     df_raw_act = pd.read_csv(raw_path)
                     raw_closes = df_raw_act['close'].values
                     sma_vals = pd.Series(raw_closes).rolling(window=sma_period).mean().values
-                    # Señal: True si close > SMA (LONG), False si no (CASH)
                     signal = raw_closes > sma_vals
-                    # Tomar solo los últimos N valores para alinear con df_returns
                     n_needed = len(df_returns)
                     if len(signal) >= n_needed:
                         sma_signals[act] = signal[-n_needed:]
                     else:
-                        sma_signals[act] = np.ones(n_needed, dtype=bool)  # fallback: siempre long
+                        sma_signals[act] = np.ones(n_needed, dtype=bool)
                 else:
                     sma_signals[act] = np.ones(len(df_returns), dtype=bool)
             except Exception:
@@ -376,18 +377,14 @@ if __name__ == "__main__":
             pnl_pct_eq = (retornos_dia.sum() / len(activos))
             capital_eq *= (1 + pnl_pct_eq)
             
-            # PnL 1/N + SMA-200 Filter
+            # PnL 1/N + SMA-200 Filter (Mismo divisor len(activos) para comparativa justa sin apalancamiento artificial)
             activos_con_signal = list(series_retornos.keys())
             sma_retorno = 0.0
-            n_activos_long = 0
             for act in activos_con_signal:
                 if act in sma_signals and i < len(sma_signals[act]) and sma_signals[act][i]:
                     sma_retorno += retornos_dia.get(act, 0.0)
-                    n_activos_long += 1
-            if n_activos_long > 0:
-                pnl_pct_sma = sma_retorno / len(activos_con_signal)  # Peso 1/N sobre total
-            else:
-                pnl_pct_sma = 0.0  # Todo en CASH
+            
+            pnl_pct_sma = sma_retorno / len(activos)
             capital_sma *= (1 + pnl_pct_sma)
             
             historial_hrp.append(capital_hrp)
