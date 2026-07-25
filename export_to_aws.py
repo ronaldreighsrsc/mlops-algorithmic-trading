@@ -13,6 +13,7 @@ def create_production_zip(output_filename="bot_production.zip"):
     # 1. Archivos base estrictamente necesarios
     includes = [
         "src/**/*.py",             
+        "data/raw/*.csv",
         "requirements.txt",        
         ".env",                    
         "start_bot.bat",           
