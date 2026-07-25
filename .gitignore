@@ -36,9 +36,16 @@ cache/
 # Logs
 *.log
 
-# Gráficos de Backtest (contienen resultados financieros sensibles)
+# Gráficos de Backtest e Imágenes generadas
+*.png
+*.jpg
+*.jpeg
 portfolio_backtest_*.png
 global_portfolio_hrp.png
+
+# Paquetes de Despliegue AWS (Archivos pesados ZIP)
+*.zip
+bot_production.zip
 
 # Pytest
 .pytest_cache/
