@@ -60,12 +60,18 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['alpha'])
     data = campeones_validos[mejor_modelo]
 
+    # Presupuesto de riesgo dinámico por activo basado en Montecarlo (fallback al riesgo base)
+    mc_mdd_val = float(data['metrics'].get('MC_MDD_95', -0.15))
+    abs_mc_mdd = max(0.05, abs(mc_mdd_val))
+    riesgo_base_activo = float(np.clip((0.15 / abs_mc_mdd) * 0.025, 0.01, 0.035))
+
     cum_ret_series = data['cum_ret_series']
     exit_times = data['exit_times']
     probs_series = data.get('probs_series', np.zeros(len(cum_ret_series)))
     umbral_base = data.get('umbral', 0.50)
     
     print(f"\n🏆 Campeón Seleccionado: {mejor_modelo} ({data['banco']})")
+    print(f"Riesgo Base Dinámico (Montecarlo MC MDD 95 {mc_mdd_val:.2%}): {riesgo_base_activo*100:.2f}%")
     print(f"Total de operaciones en el Test Set: {len(cum_ret_series)}")
     
     # 3. Simulación Financiera (Gestión de Riesgo Real)
@@ -86,9 +92,9 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     for i, retorno_raw in enumerate(retornos_trade):
         
         # En la vida real el bot usa la ecuación de Position Sizing.
-        # Asume que ajustamos el apalancamiento para que si toca el SL perdamos exactamente el 'riesgo_por_trade' (ej. 1%)
+        # Asume que ajustamos el apalancamiento para que si toca el SL perdamos exactamente el 'riesgo_base_activo'
         # El Stop Loss promedio unleveraged es k_down * vol (ej. 1.5 * 1% = 1.5%)
-        # Así que el apalancamiento estimado es: riesgo_por_trade / Riesgo_Unleveraged
+        # Así que el apalancamiento estimado es: riesgo_base_activo / Riesgo_Unleveraged
         # Extraer probabilidad y calcular el Multiplicador Kelly Dinamico
         prob = probs_series[i]
         
@@ -111,7 +117,7 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
         riesgo_unleveraged = 0.015
         
         # Ajustamos el riesgo base por el multiplicador dinámico
-        riesgo_dinamico_por_trade = riesgo_por_trade * kelly_mult
+        riesgo_dinamico_por_trade = riesgo_base_activo * kelly_mult
         apalancamiento = riesgo_dinamico_por_trade / riesgo_unleveraged
         
         # El PnL en dólares es el retorno puro por el apalancamiento por el capital
