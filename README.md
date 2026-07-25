@@ -143,26 +143,27 @@ python src/main_training.py
 *El script más pesado. Ejecútalo 1 o 2 veces al año. Pone a competir a decenas de arquitecturas (XGBoost, RandomForest, LSTM, BiLSTM, ARIMA-LSTM, LSTM-RF) utilizando **Optimización Bayesiana (Optuna TPE Sampler + Purged CV Pruning)**. A diferencia de las búsquedas aleatorias tradicionales, Optuna aprende del historial de hiperparámetros y poda ejecuciones poco prometedoras rápidamente, reduciendo los tiempos de cómputo en un 40-60%. Emite archivos `.npy` con predicciones puras y `.pkl` con modelos entrenados en `results/`.*
 
 
-### 3. Backtest de Alpha por Activo (`alpha_backtester.py`)
-```bash
-python src/evaluation/alpha_backtester.py
-```
-*Evalúa el **Alpha Puro** de cada modelo individualmente por activo. Aplica el **Pipeline Unificado de 2 Pasos** (Gatekeepers + Composite Score), genera los reportes HTML (`backtest_report_*.html`), visualiza las curvas de equidad por activo y exporta los archivos `campeon_*.json`.*
-
-### 3b. Backtest de Portafolio Multi-Activo & HRP (`portfolio_backtester.py`)
+### 3. Evaluación Financiera y Portafolio Global (`portfolio_backtester.py`)
 ```bash
 python src/evaluation/portfolio_backtester.py
 ```
-*El corazón cuantitativo de gestión de capital. Toma los campeones elegidos por el Alpha Backtester y ejecuta la **Simulación de Billetera Real**: aplica Apalancamiento Kelly Dinámico, Presupuesto Montecarlo 95% MDD, calcula la asignación de capital **HRP (López de Prado)** y exporta `hrp_weights.json` listo para despliegue en AWS.*
+> [!IMPORTANT]
+> **ESTE ES EL ÚNICO SCRIPT QUE NECESITAS EJECUTAR.**  
+> `portfolio_backtester.py` ejecuta automáticamente las 2 fases de evaluación en un solo comando:
+> 1. **Fase 1 (Alpha Engine):** Ejecuta el torneo por activo, aplica el Pipeline de 2 Pasos (Gatekeepers + Composite Score), genera los reportes HTML (`backtest_report_*.html`) y elige los modelos campeones (`campeon_*.json`).
+> 2. **Fase 2 (Portfolio Engine):** Toma los campeones de la Fase 1, simula la Billetera Real en USD con Apalancamiento Kelly Dinámico, calcula los pesos **HRP (López de Prado)** y exporta `hrp_weights.json` listo para despliegue en AWS.
 
 #### 🔄 Modos de Ejecución MLOps (`FAST_MODE` en `portfolio_backtester.py`):
-- **Re-entrenamiento MLOps Anual (`FAST_MODE = False`):** (~1-2 horas). Entrena los modelos de anomalías (HMM y LSTM Autoencoder) desde cero para cada combinación en `results/mlops_monitors/`.
-- **Evaluación Rápida (`FAST_MODE = True`):** (~2 minutos - **Modo por defecto**). Carga monitores pre-entrenados en segundos, calcula el HRP y actualiza la billetera real.
+- **Evaluación Rápida (`FAST_MODE = True`):** (~2 minutos - **Modo por defecto**). Carga los Autoencoders y HMMs pre-entrenados desde `results/mlops_monitors/` en segundos para simular el capital en USD, calcular el HRP y generar los archivos de campeones.
+- **Re-entrenamiento MLOps Anual (`FAST_MODE = False`):** (~1 hora). Entrena los modelos de detección de anomalías (HMM y LSTM Autoencoder) desde cero para cada combinación en `results/mlops_monitors/`.
 
-> 💡 **Orden de Ejecución Recomendado:**
-> 1. `main_training.py` (Genera predicciones `.npy` de los modelos base).
-> 2. `alpha_backtester.py` (Torneo y selección de Alpha por activo).
-> 3. `portfolio_backtester.py` (Simulación de billetera en USD, Kelly Dinámico y HRP global).
+> 💡 **(Opcional) Alpha Backtester Rápido (`alpha_backtester.py`):**  
+> Si solo quieres analizar el Alpha bruto de un activo individual sin pasar por la simulación de billetera ni el HRP global, puedes ejecutar opcionalmente: `python src/evaluation/alpha_backtester.py`.
+
+> 📋 **Flujo Operativo Simple:**
+> 1. `python src/main_training.py` (Solo 1 o 2 veces al año cuando entrenes nuevos modelos).
+> 2. `python src/evaluation/portfolio_backtester.py` (Mantenimiento habitual: rebalanceo HRP y preparación de campeones).
+> 3. `python export_to_aws.py` (Genera el `bot_production.zip` listo para tu servidor).
 
 ### 3c. Auditoría de Robustez y PBO (`cpcv_auditor.py`)
 ```bash
