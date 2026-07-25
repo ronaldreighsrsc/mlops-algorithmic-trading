@@ -45,17 +45,21 @@ def create_production_zip(output_filename="bot_production.zip"):
                 print(f"  [+] .keras satelital detectado: {os.path.basename(keras_model_path)}")
         
         # d) MLOps Monitors del campeón (autoencoder + HMM)
-        #    Estos están en results/ directamente como campeon_{SYMBOL}_autoencoder.keras, etc.
-        mlops_patterns = [
-            f"campeon_{symbol}_autoencoder.keras",
-            f"campeon_{symbol}_autoencoder_meta.pkl",
-            f"campeon_{symbol}_hmm.pkl",
-        ]
-        for pattern in mlops_patterns:
-            mlops_path = os.path.join(results_dir, pattern)
-            if os.path.exists(mlops_path):
-                campeon_files.append(os.path.relpath(mlops_path, base_dir))
-                print(f"  [+] MLOps monitor: {pattern}")
+        for ae_file in glob.glob(os.path.join(results_dir, f"campeon_{symbol}_autoencoder*")):
+            if os.path.isdir(ae_file):
+                for sub_root, _, sub_files in os.walk(ae_file):
+                    for sub_f in sub_files:
+                        sub_full = os.path.join(sub_root, sub_f)
+                        campeon_files.append(os.path.relpath(sub_full, base_dir))
+                        print(f"  [+] MLOps monitor dir: {os.path.relpath(sub_full, base_dir)}")
+            elif os.path.isfile(ae_file):
+                campeon_files.append(os.path.relpath(ae_file, base_dir))
+                print(f"  [+] MLOps monitor: {os.path.basename(ae_file)}")
+                
+        hmm_path = os.path.join(results_dir, f"campeon_{symbol}_hmm.pkl")
+        if os.path.exists(hmm_path):
+            campeon_files.append(os.path.relpath(hmm_path, base_dir))
+            print(f"  [+] MLOps monitor: campeon_{symbol}_hmm.pkl")
     
     with zipfile.ZipFile(output_filename, 'w', zipfile.ZIP_DEFLATED) as zipf:
         added_files = set()

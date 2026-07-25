@@ -57,6 +57,14 @@ En la industria cuantitativa, el estándar de validación más riguroso para un 
 1. **`backtester.py`** — Fila extra en la tabla HTML (`backtest_report_*.html`) y línea verde punteada en `equity_curve_*.png`.
 2. **`portfolio_backtester.py`** — Línea verde en el gráfico individual de cada activo. Tercera línea "1/N + SMA-200" en el gráfico global HRP.
 
+### 🏆 Criterios de Selección de Campeones para Producción
+Para que un modelo sea exportado a `campeon_*.json` y desplegado en vivo, debe superar 3 filtros secuenciales:
+1. **Estado VIVO (`is_dead == False`)**: No debe haber sido eliminado por el Hard Kill-Switch de Drawdown (-15% sin apalancamiento).
+2. **Viabilidad Cuantitativa**:
+   - **Opción A (Alpha Puro)**: `Alpha > 0%` (Supera al Buy & Hold).
+   - **Opción B (Grado Institucional en Índices)**: `Sharpe Ratio ≥ 1.2` AND `CAGR > 5.0%` (Tasa Libre de Riesgo US) AND `MDD > -25%`. *(Previene descartar modelos estelares como BiLSTM en SP500 durante fuertes corridas alcistas)*.
+3. **Superar el Benchmark SMA-200**: El `CAGR` de la estrategia debe superar al rendimiento del seguidor de tendencia SMA-200 (`SMA-1200` en H4).
+
 > [!IMPORTANT]
 > La SMA-200 es **exclusivamente un benchmark visual**. El Bot en producción (`main_bot.py`) **NO la utiliza**. Su único propósito es demostrar matemáticamente que el Machine Learning aporta valor real sobre la regla más simple posible.
 
