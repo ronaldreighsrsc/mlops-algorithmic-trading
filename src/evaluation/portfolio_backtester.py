@@ -85,10 +85,16 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
         mejor_modelo = max(scores_dict.keys(), key=lambda k: scores_dict[k])
         data = campeones_validos[mejor_modelo]
 
-    # Presupuesto de riesgo dinámico por activo basado en Montecarlo (fallback al riesgo base)
-    mc_mdd_val = float(data['metrics'].get('MC_MDD_95', -0.15))
-    abs_mc_mdd = max(0.05, abs(mc_mdd_val))
-    riesgo_base_activo = float(np.clip((0.15 / abs_mc_mdd) * 0.025, 0.01, 0.035))
+    # Walk-Forward Rolling MC MDD (Eliminación de Lookahead Bias)
+    # En vez de usar el MC MDD del OOS completo (que incluye trades futuros),
+    # empezamos con un valor conservador y recalibramos cada 30 trades.
+    MC_MDD_CONSERVADOR = -0.15  # Igual al Kill-Switch del alpha_backtester
+    RECALIB_EVERY = 30          # Mínimo estadístico para Monte Carlo significativo
+    N_SIMS_WALKFORWARD = 1000   # Permutaciones por recalibración
+    riesgo_base_activo = float(np.clip((0.15 / abs(MC_MDD_CONSERVADOR)) * 0.025, 0.01, 0.035))
+    
+    # Guardar el MC MDD final del OOS para exportación a producción (sin lookahead en deploy)
+    mc_mdd_final_oos = float(data['metrics'].get('MC_MDD_95', MC_MDD_CONSERVADOR))
 
     cum_ret_series = data['cum_ret_series']
     exit_times = data['exit_times']
@@ -96,7 +102,8 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     umbral_base = data.get('umbral', 0.50)
     
     print(f"\n🏆 Campeón Seleccionado: {mejor_modelo} ({data['banco']})")
-    print(f"Riesgo Base Dinámico (Montecarlo MC MDD 95 {mc_mdd_val:.2%}): {riesgo_base_activo*100:.2f}%")
+    print(f"Walk-Forward MC MDD Inicial (Conservador): {MC_MDD_CONSERVADOR:.2%} → Riesgo Inicial: {riesgo_base_activo*100:.2f}%")
+    print(f"MC MDD Final OOS (para Producción): {mc_mdd_final_oos:.2%}")
     print(f"Total de operaciones en el Test Set: {len(cum_ret_series)}")
     
     # 3. Simulación Financiera (Gestión de Riesgo Real)
@@ -114,13 +121,30 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     serie_base = np.insert(cum_ret_series, 0, 1.0)
     retornos_trade = np.diff(serie_base) / serie_base[:-1]
     
+    # Walk-Forward: Acumulador de retornos observados para recalibración progresiva
+    accumulated_returns = []
+    
     for i, retorno_raw in enumerate(retornos_trade):
         
-        # En la vida real el bot usa la ecuación de Position Sizing.
-        # Asume que ajustamos el apalancamiento para que si toca el SL perdamos exactamente el 'riesgo_base_activo'
-        # El Stop Loss promedio unleveraged es k_down * vol (ej. 1.5 * 1% = 1.5%)
-        # Así que el apalancamiento estimado es: riesgo_base_activo / Riesgo_Unleveraged
-        # Extraer probabilidad y calcular el Multiplicador Kelly Dinamico
+        # Walk-Forward Recalibration: cada RECALIB_EVERY trades, recalcular MC MDD
+        # usando SOLO los trades observados hasta este momento (sin lookahead)
+        accumulated_returns.append(retorno_raw)
+        if len(accumulated_returns) >= RECALIB_EVERY and len(accumulated_returns) % RECALIB_EVERY == 0:
+            arr_wf = np.array(accumulated_returns)
+            mdd_sims = []
+            for _ in range(N_SIMS_WALKFORWARD):
+                sim = np.random.choice(arr_wf, size=len(arr_wf), replace=True)
+                cum = (1 + sim).cumprod()
+                peak = np.maximum.accumulate(cum)
+                dd = (cum - peak) / peak
+                mdd_sims.append(dd.min())
+            mc_mdd_rolling = np.percentile(mdd_sims, 5)
+            abs_mc = max(0.05, abs(mc_mdd_rolling))
+            riesgo_base_activo = float(np.clip((0.15 / abs_mc) * 0.025, 0.01, 0.035))
+            print(f"  🔄 Walk-Forward MC MDD Recalibrado (Trade #{len(accumulated_returns)}): "
+                  f"MC_MDD_95 = {mc_mdd_rolling:.2%} → Riesgo = {riesgo_base_activo*100:.2f}%")
+        
+        # Position Sizing con Kelly Dinámico usando riesgo_base_activo Walk-Forward
         prob = probs_series[i]
         
         # Calcular delta (qué tan lejos estamos de la barrera de entrada)
@@ -305,7 +329,7 @@ if __name__ == "__main__":
     # ==============================================================================
     CAPITAL = 10000.0        # USD en tu broker
     RIESGO_PCT = 0.025       # 2.5% riesgo base por trade
-    FAST_MODE = True         # True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
+    FAST_MODE = False    # True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
     
     activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
 
