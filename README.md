@@ -157,6 +157,25 @@ python src/evaluation/portfolio_backtester.py
 - **Evaluación Rápida (`FAST_MODE = True`):** (~2 minutos - **Modo por defecto**). Carga los Autoencoders y HMMs pre-entrenados desde `results/mlops_monitors/` en segundos para simular el capital en USD, calcular el HRP y generar los archivos de campeones.
 - **Re-entrenamiento MLOps Anual (`FAST_MODE = False`):** (~1 hora). Entrena los modelos de detección de anomalías (HMM y LSTM Autoencoder) desde cero para cada combinación en `results/mlops_monitors/`.
 
+#### 🎲 Eliminación de Lookahead Bias: Walk-Forward Rolling MC MDD
+
+El **Monte Carlo MDD 95%** es la métrica que dimensiona cuánto capital arriesgar por trade (Position Sizing). Sin embargo, calcular el MC MDD al final del período Out-of-Sample (OOS) y usarlo desde el primer trade introduce un **Lookahead Bias** (el backtest "ve el futuro" para dimensionar trades pasados).
+
+Para eliminar este sesgo, `portfolio_backtester.py` implementa un **Walk-Forward Rolling MC MDD**:
+
+| Período | MC MDD Utilizado | Lógica |
+|---|---|---|
+| **Trades #1 a #29** | Conservador: `-15%` (Kill-Switch) → Riesgo `2.50%` | *"No sé nada de esta estrategia, asumo el peor caso"* |
+| **Trade #30** | 🔄 Recalibra con 1,000 permutaciones de los trades 1-29 | Primera estimación real basada en evidencia |
+| **Trade #60** | 🔄 Recalibra con trades 1-59 | Estimación más precisa con más datos |
+| **Trade #90+** | 🔄 Recalibra cada 30 trades | Converge al MC MDD del OOS completo |
+
+> [!NOTE]
+> **Backtest vs Producción (Asimetría Intencional):**
+> - **En el backtest**, el Walk-Forward empieza conservador y aprende progresivamente → actúa como **cota inferior (lower bound)** de rendimiento.
+> - **En producción (AWS)**, el bot arranca con el MC MDD del OOS completo (legítimo, ya que al desplegar ya se observó todo el OOS) → tiene **mejor información desde el día 1**.
+> - Si el backtest pesimista ya es rentable, producción lo será **igual o más**. Esta asimetría es una característica de diseño, no un defecto.
+
 > 💡 **(Opcional) Alpha Backtester Rápido (`alpha_backtester.py`):**  
 > Si solo quieres analizar el Alpha bruto de un activo individual sin pasar por la simulación de billetera ni el HRP global, puedes ejecutar opcionalmente: `python src/evaluation/alpha_backtester.py`.
 
