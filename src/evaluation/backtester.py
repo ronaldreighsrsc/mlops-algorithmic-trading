@@ -443,7 +443,7 @@ class TripleBarrierBacktester:
                             
                         _, _, train_rolling_metrics = self.simulate_trades(df_train, train_probs, is_training_phase=True, macro_cols=macro_cols)
                         
-                        if len(train_rolling_metrics) > 10:
+                if len(train_rolling_metrics) > 10:
                             from models.anomaly_detector import StrategyLSTMAutoencoder
                             hybrid_monitor.lstm_model = StrategyLSTMAutoencoder(epochs=50, batch_size=4)
                             X_train = np.array(train_rolling_metrics)
@@ -510,60 +510,45 @@ class TripleBarrierBacktester:
                         )
                         metrics.update(mc_dsr_metrics)
                         
-                        # --- MLflow Candidate Tracking ---
-                        try:
-                            import mlflow
-                            mlflow.set_experiment(f"Tournament_{self.activo}")
-                            with mlflow.start_run(run_name=f"{modelo}_{banco}_{umbral:.0%}", nested=True):
-                                mlflow.log_params({
-                                    "activo": self.activo,
-                                    "modelo": modelo,
-                                    "banco": banco,
-                                    "umbral": umbral,
-                                    "is_dead": str(is_dead)
-                                })
-                                raw_cand_metrics = {
-                                    "alpha": alpha,
-                                    "retorno_estrategia": retorno_estrategia,
-                                    "retorno_mercado": retorno_mercado_total,
-                                    "cagr_est": cagr_est,
-                                    "cagr_mkt": cagr_mkt,
-                                    "win_rate": win_rate,
-                                    "n_trades": float(n_trades),
-                                    "sharpe": metrics.get("Sharpe", 0.0),
-                                    "sortino": metrics.get("Sortino", 0.0),
-                                    "calmar": metrics.get("Calmar", 0.0),
-                                    "max_dd": metrics.get("MaxDD", 0.0),
-                                    "dsr": metrics.get("DSR", 0.0)
-                                }
-                                clean_cand_metrics = {}
-                                for k, v in raw_cand_metrics.items():
-                                    try:
-                                        val = float(v)
-                                        if not np.isnan(val) and not np.isinf(val):
-                                            clean_cand_metrics[k] = val
-                                    except (ValueError, TypeError):
-                                        pass
-                                mlflow.log_metrics(clean_cand_metrics)
-                        except Exception:
-                            pass
+                        # Guardar candidato
+                        candidatos_para_modelo.append({
+                            'banco': f"{banco} (>{umbral:.0%})", 'alpha': alpha, 
+                            'umbral': umbral,
+                            'ret_est': retorno_estrategia, 'ret_mkt': retorno_mercado_total,
+                            'cagr_est': cagr_est, 'cagr_mkt': cagr_mkt,
+                            'trades': n_trades, 'win_rate': win_rate,
+                            'avg_duration': trade_results['duration'].mean() if 'duration' in trade_results else 0.0,
+                            'metrics': metrics,
+                            'cum_ret_series': trade_results['cum_ret'].values,
+                            'probs_series': trade_results['prob'].values if 'prob' in trade_results.columns else np.zeros(len(trade_results)),
+                            'exit_times': trade_results['exit_time'].values,
+                            'is_dead': is_dead,
+                            'hybrid_monitor': hybrid_monitor
+                        })
 
-                        if alpha > mejor_alpha:
-                            mejor_alpha = alpha
-                            campeon_actual = {
-                                'banco': f"{banco} (>{umbral:.0%})", 'alpha': alpha, 
-                                'umbral': umbral,
-                                'ret_est': retorno_estrategia, 'ret_mkt': retorno_mercado_total,
-                                'cagr_est': cagr_est, 'cagr_mkt': cagr_mkt,
-                                'trades': n_trades, 'win_rate': win_rate,
-                                'avg_duration': trade_results['duration'].mean() if 'duration' in trade_results else 0.0,
-                                'metrics': metrics,
-                                'cum_ret_series': trade_results['cum_ret'].values,
-                                'probs_series': trade_results['prob'].values if 'prob' in trade_results.columns else np.zeros(len(trade_results)),
-                                'exit_times': trade_results['exit_time'].values,
-                                'is_dead': is_dead,
-                                'hybrid_monitor': hybrid_monitor
-                            }
+            # Seleccionar la mejor configuración para este modelo usando Paso 1 (Gatekeepers) + Paso 2 (Composite Scoring)
+            campeon_actual = None
+            if candidatos_para_modelo:
+                validos = [c for c in candidatos_para_modelo if not c['is_dead'] and c['trades'] >= 25 and c['metrics'].get('MDD', -1.0) > -0.20]
+                if not validos:
+                    validos = [c for c in candidatos_para_modelo if not c['is_dead']]
+                if not validos:
+                    validos = candidatos_para_modelo
+                    
+                if len(validos) == 1:
+                    campeon_actual = validos[0]
+                else:
+                    alphas = np.array([c['alpha'] for c in validos])
+                    cagrs = np.array([c['cagr_est'] for c in validos])
+                    sharpes = np.array([c['metrics'].get('Sharpe', 0.0) for c in validos])
+                    
+                    def min_max_norm(arr):
+                        rng = arr.max() - arr.min()
+                        return (arr - arr.min()) / rng if rng > 0 else np.ones_like(arr)
+                    
+                    scores = 0.50 * min_max_norm(alphas) + 0.30 * min_max_norm(cagrs) + 0.20 * min_max_norm(sharpes)
+                    best_idx = int(np.argmax(scores))
+                    campeon_actual = validos[best_idx]
                         
             if campeon_actual:
                 campeones[modelo] = campeon_actual
@@ -799,34 +784,40 @@ class TripleBarrierBacktester:
         if not campeones:
             return
             
-        # Filtrar campeones VIVOS que cumplan ALFA > 0 O SHARPE >= 1.2 (Grado Institucional en Índices Alcistas)
+        # Paso 1: Filtros Duros Gatekeepers (Vivos, trades >= 25, MDD > -20%)
         campeones_validos = {}
         for mod, data in campeones.items():
             if data.get('is_dead', False):
                 continue
-            
-            is_alpha_viable = data['alpha'] > 0
-            is_sharpe_viable = (data['metrics'].get('Sharpe', 0.0) >= 1.2 and 
-                                data.get('cagr_est', 0.0) > 0.05 and 
-                                data['metrics'].get('MDD', 0.0) > -0.25)
-            
-            if is_alpha_viable or is_sharpe_viable:
+            n_trades = data.get('trades', 0)
+            mdd_hist = data['metrics'].get('MDD', -1.0)
+            if n_trades >= 25 and mdd_hist > -0.20:
                 campeones_validos[mod] = data
         
-        # Filtro 3: Superar al SMA-200 (si está disponible)
-        if sma_benchmark is not None and campeones_validos:
-            sma_cagr = sma_benchmark['cagr']
-            antes = len(campeones_validos)
-            campeones_validos = {mod: data for mod, data in campeones_validos.items() if data['cagr_est'] > sma_cagr}
-            eliminados = antes - len(campeones_validos)
-            if eliminados > 0:
-                print(f"  📏 Filtro SMA-200: {eliminados} campeón(es) eliminado(s) por no superar CAGR del {sma_benchmark['label']} ({sma_cagr:.2%})")
-        
         if not campeones_validos:
-            print(f"  ⚠️ No hay campeones viables (Vivos, con Alpha > 0 o Sharpe >= 1.2, y > SMA-200) para {self.activo}. No se exportará configuración para producción.")
-            return
+            # Fallback a Vivos si ninguno cumple trades >= 25 y MDD > -20%
+            campeones_validos = {mod: data for mod, data in campeones.items() if not data.get('is_dead', False)}
             
-        mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['alpha'])
+        if not campeones_validos:
+            print(f"  ⚠️ No hay campeones viables para {self.activo}. No se exportará configuración para producción.")
+            return
+
+        # Paso 2: Composite Score (50% Alpha + 30% CAGR + 20% Sharpe)
+        if len(campeones_validos) == 1:
+            mejor_modelo = list(campeones_validos.keys())[0]
+        else:
+            alphas = np.array([v['alpha'] for v in campeones_validos.values()])
+            cagrs = np.array([v.get('cagr_est', 0.0) for v in campeones_validos.values()])
+            sharpes = np.array([v['metrics'].get('Sharpe', 0.0) for v in campeones_validos.values()])
+            
+            def min_max_norm(arr):
+                rng = arr.max() - arr.min()
+                return (arr - arr.min()) / rng if rng > 0 else np.ones_like(arr)
+            
+            scores = 0.50 * min_max_norm(alphas) + 0.30 * min_max_norm(cagrs) + 0.20 * min_max_norm(sharpes)
+            mejor_idx = int(np.argmax(scores))
+            mejor_modelo = list(campeones_validos.keys())[mejor_idx]
+
         data = campeones_validos[mejor_modelo]
         
         banco_clean = data['banco'].split(" (")[0]
