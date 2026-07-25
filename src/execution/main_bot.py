@@ -54,8 +54,11 @@ class TradingBot:
         sym_code = abs(hash(self.symbol)) % 1000
         self.engine.magic_number = 100000 + sym_code * 10 + tf_code
 
+        # Presupuesto de riesgo dinámico por activo basado en Montecarlo
+        risk_pct = config.get("optimal_risk_pct", 0.025)
+        
         self.risk_manager = RiskManager(
-            risk_per_trade_pct=0.025,
+            risk_per_trade_pct=risk_pct,
             k_up=config["k_up"],
             k_down=config["k_down"]
         )

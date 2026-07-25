@@ -843,6 +843,13 @@ class TripleBarrierBacktester:
             features = []
             
         tf_str = "H4" if "H4" in self.activo else ("H1" if "H1" in self.activo else "D1")
+        
+        # Automatización de Presupuesto de Riesgo Dinámico y Kill-Switch Montecarlo
+        mc_mdd_val = float(data['metrics'].get('MC_MDD_95', -0.15))
+        abs_mc_mdd = max(0.05, abs(mc_mdd_val))
+        optimal_risk = float(np.clip((0.15 / abs_mc_mdd) * 0.025, 0.01, 0.035))
+        kill_switch_mdd = float(min(-0.15, 1.2 * mc_mdd_val))
+        
         config = {
             "activo": self.activo,
             "timeframe": tf_str,
@@ -853,7 +860,10 @@ class TripleBarrierBacktester:
             "confidence_threshold": data['umbral'],
             "k_up": self.k_up,
             "k_down": self.k_down,
-            "bilateral": self.bilateral
+            "bilateral": self.bilateral,
+            "mc_mdd_95": round(mc_mdd_val, 4),
+            "optimal_risk_pct": round(optimal_risk, 4),
+            "kill_switch_mdd": round(kill_switch_mdd, 4)
         }
         
         json_path = os.path.join(self.results_dir, f"campeon_{self.activo}.json")
