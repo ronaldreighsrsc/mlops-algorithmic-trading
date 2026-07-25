@@ -668,7 +668,7 @@ class TripleBarrierBacktester:
                 <tr>
                     <th>Modelo</th><th>Banco Features</th><th>Estado</th>
                     <th>Alpha</th><th>CAGR</th><th>Trades</th><th>Win %</th><th>Duración (días)</th>
-                    <th>Sharpe</th><th>PSR</th><th>DSR</th><th>MC MDD 95</th><th>CVaR 95</th>
+                    <th>Sharpe</th><th>STARR</th><th>MDD Hist</th><th>MC MDD 95</th><th>CVaR 95</th>
                 </tr>
             </thead>
             <tbody>
@@ -680,8 +680,8 @@ class TripleBarrierBacktester:
                     <td>BENCHMARK</td><td>Buy & Hold</td><td>-</td><td>0.00%</td>
                     <td class="{'positive' if primer['cagr_mkt'] >= 0 else 'negative'}">{primer['cagr_mkt']:.2%}</td>
                     <td>-</td><td>-</td><td>-</td>
-                    <td>{mkt_sharpe_str}</td><td>-</td><td>-</td>
-                    <td>{mkt_mdd_str}</td><td>{mkt_cvar_str}</td>
+                    <td>{mkt_sharpe_str}</td><td>-</td><td>{mkt_mdd_str}</td>
+                    <td>-</td><td>{mkt_cvar_str}</td>
                 </tr>
 """
         # Fila SMA-200 Benchmark (si está disponible)
@@ -693,8 +693,8 @@ class TripleBarrierBacktester:
                     <td>BENCHMARK</td><td>{sma_benchmark['label']} Trend Following</td><td>-</td><td>-</td>
                     <td class="{sma_cagr_cls}">{sma_benchmark['cagr']:.2%}</td>
                     <td>-</td><td>-</td><td>-</td>
-                    <td>{sma_benchmark['sharpe']:.2f}</td><td>-</td><td>-</td>
-                    <td>{sma_benchmark['mdd']:.2%}</td><td>{sma_cvar_str}</td>
+                    <td>{sma_benchmark['sharpe']:.2f}</td><td>-</td><td>{sma_benchmark['mdd']:.2%}</td>
+                    <td>-</td><td>{sma_cvar_str}</td>
                 </tr>
 """
 
@@ -713,7 +713,7 @@ class TripleBarrierBacktester:
                     <td class="{alpha_cls}">{data['alpha']:.2%}</td>
                     <td class="{cagr_cls}">{data['cagr_est']:.2%}</td>
                     <td>{data['trades']}</td><td>{data['win_rate']:.1%}</td><td>{data['avg_duration']:.1f}</td>
-                    <td>{m['Sharpe']:.2f}</td><td>{m['PSR']:.1%}</td><td>{m['DSR']:.1%}</td>
+                    <td>{m['Sharpe']:.2f}</td><td>{m['STARR']:.2f}</td><td>{m['MDD']:.2%}</td>
                     <td>{m['MC_MDD_95']:.2%}</td><td>{m['CVaR_95']:.2%}</td>
                 </tr>
 """
