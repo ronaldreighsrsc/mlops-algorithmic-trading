@@ -421,6 +421,13 @@ class TradingBot:
             )
 
             
+            # Registrar en el Diario de Trading en Vivo (CSV)
+            self._log_to_live_journal(
+                prob=prob, signal=direction, status="EJECUTADO", 
+                price=current_price, tp=tp_price, sl=sl_price, 
+                lots=lots, risk_pct=dynamic_risk_pct, balance=account_balance
+            )
+
             # 6. Enviar orden a MT5
             if self.symbol != "ECH":
                 if is_long:
@@ -433,6 +440,51 @@ class TradingBot:
             # Enviar notificación de status sin señal
             last_vol = df_proc['EGARCH_Vol'].iloc[-1]
             self.notifier.alert_daily_check(self.symbol, last_vol, has_signal=False)
+            self._log_to_live_journal(
+                prob=prob, signal="CASH (Sin Señal)", status="CASH", 
+                price=df_proc['close'].iloc[-1], tp=0.0, sl=0.0, 
+                lots=0.0, risk_pct=0.0, balance=0.0
+            )
+
+    def _log_to_live_journal(self, prob: float, signal: str, status: str, 
+                             price: float, tp: float, sl: float, 
+                             lots: float, risk_pct: float, balance: float):
+        """Registra cada señal y operación en un archivo CSV persistente (results/live_signal_journal.csv)"""
+        try:
+            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+            results_dir = os.path.join(base_dir, "results")
+            os.makedirs(results_dir, exist_ok=True)
+            journal_path = os.path.join(results_dir, "live_signal_journal.csv")
+            
+            file_exists = os.path.exists(journal_path)
+            
+            tf_str_map = {mt5.TIMEFRAME_D1: "D1", mt5.TIMEFRAME_H4: "H4", mt5.TIMEFRAME_H1: "H1"}
+            tf_label = tf_str_map.get(self.timeframe, self.config.get("timeframe", "D1"))
+            
+            risk_usd = balance * risk_pct
+            
+            row = {
+                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "symbol": self.symbol,
+                "timeframe": tf_label,
+                "model_type": self.config.get("model_type", "UNKNOWN"),
+                "probability": round(prob, 4),
+                "threshold": round(self.config.get("confidence_threshold", 0.5), 4),
+                "signal": signal,
+                "status": status,
+                "price": round(price, 5),
+                "tp": round(tp, 5),
+                "sl": round(sl, 5),
+                "lots": round(lots, 2),
+                "risk_pct": round(risk_pct, 4),
+                "risk_usd": round(risk_usd, 2)
+            }
+            
+            df_row = pd.DataFrame([row])
+            df_row.to_csv(journal_path, mode='a', header=not file_exists, index=False, encoding='utf-8')
+            logging.info(f"  📓 Señal registrada en el Diario en Vivo: {journal_path}")
+        except Exception as e:
+            logging.error(f"Error al escribir en el Diario de Trading: {e}")
 
     def _run_shadow_journal(self, df_proc: pd.DataFrame) -> bool:
         """
