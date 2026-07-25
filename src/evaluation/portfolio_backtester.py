@@ -30,49 +30,60 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
         print("❌ No se encontraron modelos campeones en caché. Ejecuta main_training.py primero.")
         return
         
-    # 2. Elegir el mejor modelo (VIVO + Alpha > 0 O Sharpe >= 1.2 Institucional + > SMA-200)
+    # 2. PASO 1: Filtros Duros Gatekeepers (Innegociables, sin DSR)
+    # - is_dead == False (Pasó monitor de anomalías Autoencoder LSTM)
+    # - trades >= 25 (Mínimo estadístico de muestras OOS)
+    # - MDD > -0.20 (Drawdown máximo no peor a -20%)
     campeones_validos = {}
     for mod, data in campeones.items():
         if data.get('is_dead', False):
             continue
         
-        is_alpha_viable = data['alpha'] > 0
-        is_sharpe_viable = (data['metrics'].get('Sharpe', 0.0) >= 1.2 and 
-                            data.get('cagr_est', 0.0) > 0.05 and 
-                            data['metrics'].get('MDD', 0.0) > -0.25)
+        n_trades = data.get('trades', 0)
+        mdd_hist = data['metrics'].get('MDD', -1.0)
         
-        if is_alpha_viable or is_sharpe_viable:
+        if n_trades >= 25 and mdd_hist > -0.20:
             campeones_validos[mod] = data
-    
-    # Filtro 3: Evaluación de Viabilidad vs SMA-200 (Superar CAGR O Superar Sharpe Institucional)
-    if sma_benchmark is not None and campeones_validos:
-        sma_cagr = sma_benchmark.get('cagr', 0.0)
-        sma_sharpe = sma_benchmark.get('sharpe', 1.0)
-        antes = len(campeones_validos)
-        
-        # Sobreviven si superan el CAGR de la SMA-200 O si tienen un Sharpe superior a la SMA-200 con retorno positivo
-        campeones_filtrados = {}
-        for mod, data in campeones_validos.items():
-            mod_sharpe = data['metrics'].get('Sharpe', 0.0)
-            if data['cagr_est'] > sma_cagr or (mod_sharpe > sma_sharpe and data['cagr_est'] > 0.02):
-                campeones_filtrados[mod] = data
-                
-        eliminados = antes - len(campeones_filtrados)
-        if eliminados > 0:
-            print(f"  📏 Filtro SMA-200: {eliminados} campeón(es) eliminado(s) por no superar CAGR ({sma_cagr:.2%}) ni Sharpe ({sma_sharpe:.2f}) del Benchmark.")
-        campeones_validos = campeones_filtrados
-    
+        else:
+            razon = []
+            if n_trades < 25: razon.append(f"Trades < 25 ({n_trades})")
+            if mdd_hist <= -0.20: razon.append(f"MDD <= -20% ({mdd_hist:.2%})")
+            print(f"  🚫 Modelo {mod} descartado en Paso 1: {', '.join(razon)}")
+
     if not campeones_validos:
-        print(f"❌ No hay campeones viables (Alpha > 0 O Sharpe > SMA-200) para {activo}.")
+        print(f"❌ No hay campeones que superen los Filtros Duros (Paso 1) para {activo}.")
         return None
 
-    # Criterio de Selección: Si hay modelos con Alpha > 0 se prioriza Alpha; de lo contrario se prioriza el Sharpe Ratio supremo.
-    modelos_con_alpha = [k for k, v in campeones_validos.items() if v['alpha'] > 0]
-    if modelos_con_alpha:
-        mejor_modelo = max(modelos_con_alpha, key=lambda k: campeones_validos[k]['alpha'])
+    # 3. PASO 2: Ranking Multicriterio Inclinado a Rentabilidad (Profit-Oriented Composite Scoring)
+    # Ponderaciones: 50% Alpha + 30% CAGR + 20% Sharpe
+    if len(campeones_validos) == 1:
+        mejor_modelo = list(campeones_validos.keys())[0]
+        data = campeones_validos[mejor_modelo]
+        print(f"  🎯 Modelo Único Sobreviviente: {mejor_modelo}")
     else:
-        mejor_modelo = max(campeones_validos.keys(), key=lambda k: campeones_validos[k]['metrics'].get('Sharpe', 0.0))
-    data = campeones_validos[mejor_modelo]
+        # Extraer métricas para min-max normalization
+        alphas = np.array([v['alpha'] for v in campeones_validos.values()])
+        cagrs = np.array([v.get('cagr_est', 0.0) for v in campeones_validos.values()])
+        sharpes = np.array([v['metrics'].get('Sharpe', 0.0) for v in campeones_validos.values()])
+        
+        def min_max_norm(arr):
+            rng = arr.max() - arr.min()
+            return (arr - arr.min()) / rng if rng > 0 else np.ones_like(arr)
+        
+        norm_alpha = min_max_norm(alphas)
+        norm_cagr = min_max_norm(cagrs)
+        norm_sharpe = min_max_norm(sharpes)
+        
+        scores = 0.50 * norm_alpha + 0.30 * norm_cagr + 0.20 * norm_sharpe
+        
+        scores_dict = {}
+        for idx, (mod, mod_data) in enumerate(campeones_validos.items()):
+            score_val = scores[idx]
+            scores_dict[mod] = score_val
+            print(f"  📊 Composite Score {mod:>15}: {score_val:.4f} (Alpha: {mod_data['alpha']:.2%}, CAGR: {mod_data.get('cagr_est',0):.2%}, Sharpe: {mod_data['metrics'].get('Sharpe',0):.2f})")
+        
+        mejor_modelo = max(scores_dict.keys(), key=lambda k: scores_dict[k])
+        data = campeones_validos[mejor_modelo]
 
     # Presupuesto de riesgo dinámico por activo basado en Montecarlo (fallback al riesgo base)
     mc_mdd_val = float(data['metrics'].get('MC_MDD_95', -0.15))
