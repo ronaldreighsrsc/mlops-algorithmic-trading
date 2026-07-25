@@ -29,11 +29,14 @@ Si el mercado sufre un cambio fundamental incorregible, la estrategia sufrirá e
 > [!NOTE] 
 > **Filosofía Institucional del Riesgo:** El multiplicador del Kill-Switch se mantiene unificado (x10) para todos los modelos, en lugar de calcularse dinámicamente según el Win Rate *In-Sample* de cada uno. Esto evita el *Overfitting* de reglas de riesgo y previene que un modelo ineficiente se auto-asigne límites de pérdida enormes. En la arquitectura cuantitativa seria: **El inversor define el límite máximo de dolor (Capital Tolerance), no el modelo estadístico.**
 
-### 3. Detector de Vejez (Concept Drift Detector)
-La estadística del mercado envejece. El sistema calcula constantemente la Mediana del Error de Reconstrucción de los últimos 30 trades en producción y lo compara contra la frontera P90 del entrenamiento In-Sample. Si la mediana reciente rompe esta frontera, el sistema avisa que **el modelo está estadísticamente obsoleto (Concept Drift)** y requiere re-entrenamiento (Retuning) urgente, sin necesidad de esperar a sufrir pérdidas severas.
+### 3. Monitor MLOps Dual (P90 Concept Drift vs P99 Anomalía Crítica)
+El filtro micro-estructural (LSTM Autoencoder) evalúa la salud de las velas bajo dos umbrales estadísticos distintos:
+
+- **Mediana Acumulada P90 (Concept Drift / Acomodación de Volatilidad)**: Mide si la mediana del Error de Reconstrucción (MSE) de las velas de los últimos 300 días superó el percentil P90 del entrenamiento original. Indica que la volatilidad de fondo evolucionó. **El bot mantiene su operativa ACTIVA** y notifica por Telegram la sugerencia de refrescar el Autoencoder en el próximo mantenimiento de rutina.
+- **Evento Puntual P99 (Anomalía Crítica / Cisne Negro / Cuarentena)**: Mide si una vela o ventana puntual sufrió un shock extremo que supera el percentil P99 (ej. pánico sorpresivo de mercado). **El bot BLOQUEA las operaciones de inmediato** y entra en Cuarentena preventiva para proteger el capital.
 
 ### 4. Shadow Journal (Diario Sin Estado en Producción)
-Para alimentar los detectores de MLOps en el día a día sin depender de bases de datos o archivos `.csv` corruptibles, el bot en vivo utiliza una arquitectura **Stateless**. Cada mañana descarga los últimos 300 días de historial, predice las probabilidades "al vuelo" y simula internamente las operaciones recientes usando el `TripleBarrierBacktester`. El resultado de esta simulación "sombra" le permite saber instantáneamente si está en racha perdedora y auto-bloquearse (activar Cuarentena) antes de lanzar la orden del día.
+Para alimentar los detectores MLOps diariamente sin depender de bases de datos corruptibles, el bot en vivo utiliza una arquitectura **Stateless**. Cada mañana descarga los últimos 300 días de historial, procesa las velas "al vuelo" y evalúa la salud del filtro. El resultado de este diagnóstico sombra le permite saber instantáneamente si el mercado es seguro o si debe auto-bloquearse antes de lanzar la orden a MT5.
 
 ### 6. MLflow Experiment Tracking & Model Registry
 Seguimiento automático de experimentos MLOps. Registra hiperparámetros, métricas estadísticas y financieras (Sharpe, Alpha, Win Rate, ROI), gráficos de equidad y artefactos de modelos. Permite comparar ejecuciones históricas y versionar campeones mediante una interfaz web interactiva accesible vía `mlflow ui`.

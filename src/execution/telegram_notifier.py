@@ -101,10 +101,10 @@ class TelegramNotifier:
 
     def alert_mlops_quarantine(self, symbol: str):
         msg = (
-            f"🚨 *CUARENTENA MLOps ACTIVADA* 🚨\n"
+            f"🚨 *CUARENTENA MLOps ACTIVADA (EVENTO PUNTUAL P99)* 🚨\n"
             f"Activo: {symbol}\n"
-            f"El *Shadow Journal* detectó anomalías estructurales (Autoencoder) o Alpha Decay (MDD).\n"
-            f"🛑 *Trade Bloqueado.* El modelo entra en cuarentena silenciosa para proteger el capital institucional."
+            f"El *Autoencoder LSTM* detectó una **vela anómala extrema (P99 / Cisne Negro)** o rompimiento de MDD (-20%).\n"
+            f"🛑 *Trade Bloqueado.* El bot entra en cuarentena preventiva para proteger el capital ante pánico de mercado."
         )
         self.send_message(msg)
 
@@ -112,17 +112,18 @@ class TelegramNotifier:
         msg = (
             f"✅ *CUARENTENA MLOps LEVANTADA* ✅\n"
             f"Activo: {symbol}\n"
-            f"El *Shadow Journal* evaluó los últimos 300 días y confirmó que la estadística volvió a la normalidad.\n"
+            f"El *Shadow Journal* evaluó las últimas velas y confirmó que la anomalía extrema ha pasado.\n"
             f"▶️ *Operaciones reactivadas.*"
         )
         self.send_message(msg)
 
     def alert_concept_drift(self, symbol: str):
         msg = (
-            f"⚠️ *AVISO DE MANTENIMIENTO: CONCEPT DRIFT* ⚠️\n"
+            f"⚠️ *AVISO MLOps: CONCEPT DRIFT (MEDIANA ACUMULADA P90)* ⚠️\n"
             f"Activo: {symbol}\n"
-            f"El filtro de anomalías (Autoencoder) está envejeciendo. La mediana de errores recientes superó el límite P90 del entrenamiento.\n"
-            f"👉 *Recomendación:* El bot seguirá operando, pero se sugiere correr el `portfolio_backtester.py` este fin de semana para refrescar y re-entrenar la estadística MLOps."
+            f"La **mediana acumulada de fondo** de los últimos 300 días superó el percentil P90 (el régimen de volatilidad del mercado evolucionó).\n"
+            f"🟢 *OPERATIVIDAD ACTIVA:* El bot **SIGUE OPERANDO NORMALMENTE**.\n"
+            f"💡 *Sugerencia:* Refrescar el Autoencoder corriendo `portfolio_backtester.py` en tu próximo mantenimiento de rutina."
         )
         self.send_message(msg)
 
