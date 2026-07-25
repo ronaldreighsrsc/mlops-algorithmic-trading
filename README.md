@@ -65,15 +65,23 @@ En la industria cuantitativa, el estándar de validación más riguroso para un 
 > 2. **Shadow Journal:** Corre una simulación interna de 300 días para evaluar el estado del *Autoencoder* y verificar si el bot tiene permiso de operar o si debe permanecer en *Cuarentena*.
 
 ### 🏆 Criterios de Selección de Campeones para Producción
-Para que un modelo sea exportado a `campeon_*.json` y desplegado en vivo, debe superar 3 filtros secuenciales:
-1. **Estado VIVO (`is_dead == False`)**: No debe haber sido eliminado por el Hard Kill-Switch de Drawdown (-15% sin apalancamiento).
-2. **Viabilidad Cuantitativa**:
-   - **Opción A (Alpha Puro)**: `Alpha > 0%` (Supera al Buy & Hold).
-   - **Opción B (Grado Institucional en Índices)**: `Sharpe Ratio ≥ 1.2` AND `CAGR > 5.0%` (Tasa Libre de Riesgo US) AND `MDD > -25%`. *(Previene descartar modelos estelares como BiLSTM en SP500 durante fuertes corridas alcistas)*.
-3. **Superar el Benchmark SMA-200**: El `CAGR` de la estrategia debe superar al rendimiento del seguidor de tendencia SMA-200 (`SMA-1200` en H4).
+Para que un modelo sea exportado a `campeon_*.json` y desplegado en vivo, el sistema utiliza un **Pipeline Unificado de 2 Pasos** (sincronizado entre `backtester.py` y `portfolio_backtester.py`):
 
-> [!IMPORTANT]
-> La SMA-200 es **exclusivamente un benchmark visual**. El Bot en producción (`main_bot.py`) **NO la utiliza**. Su único propósito es demostrar matemáticamente que el Machine Learning aporta valor real sobre la regla más simple posible.
+1. **Paso 1: Gatekeepers Duros (Filtros Innegociables)**:
+   - **Estado VIVO (`is_dead == False`)**: No debe haber sido rechazado por el monitor de anomalías LSTM Autoencoder ni el Hard Kill-Switch.
+   - **Significancia Estadística (`n_trades >= 25`)**: Mínimo de 25 operaciones en Out-of-Sample para prevenir sesgos por muestras pequeñas.
+   - **Preservación de Capital (`MDD > -20.0%`)**: Drawdown máximo en OOS no peor a -20%.
+
+2. **Paso 2: Ranking Multicriterio Inclinado a Rentabilidad (Composite Score)**:
+   Para los candidatos que superan el Paso 1, se calcula una puntuación ponderada normalizada (Min-Max):
+   $$\text{Composite Score} = 0.50 \cdot \text{Alpha}_{\text{norm}} + 0.30 \cdot \text{CAGR}_{\text{norm}} + 0.20 \cdot \text{Sharpe}_{\text{norm}}$$
+   - **50% Alpha**: Prioriza fuertemente el exceso de rentabilidad neta sobre el mercado.
+   - **30% CAGR**: Premia la tasa de crecimiento anualizada compuesta.
+   - **20% Sharpe**: Garantiza la estabilidad y calidad ajustada por riesgo.
+
+3. **Métricas Avanzadas en Cartera Global**:
+   - **CAGR**: Tasa de Crecimiento Anual Compuesta equivalente.
+   - **STARR Ratio ($\text{CAGR} / |\text{MDD}|$)**: Eficiencia de dolor/recompensa. Mide la ganancia ganada por cada punto de caída acumulada.
 
 ---
 
