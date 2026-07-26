@@ -327,7 +327,7 @@ if __name__ == "__main__":
     # CONFIGURACIÓN MAESTRA DE EVALUACIÓN Y PORTAFOLIO GLOBAL
     # ==============================================================================
     CAPITAL = 10000.0        # USD en tu broker
-    RIESGO_PCT = 0.035       # 3.5% riesgo base por trade (optimizado para presupuesto MDD < 15%)
+    RIESGO_PCT = 0.045       # 4.5% riesgo base por trade (optimizado para presupuesto MDD < 15%)
     FAST_MODE = True         # True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
     
     activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
@@ -417,14 +417,18 @@ if __name__ == "__main__":
                         for col in cols_validas:
                             pesos_hrp[col] = pesos_hrp_validos[col]
                         
-                        # Adaptive HRP Shrinkage + Dynamic Clamping
-                        # 1. Shrinkage Bayesiano hacia 1/N (lambda = 0.60)
-                        # Combina la matriz de covarianza descorrelacionada HRP (40%) con el equi-peso 1/N (60%)
-                        # para capturar el Alpha masivo de activos explosivos manteniendo la descorrelación HRP.
-                        SHRINKAGE_LAMBDA = 0.60
-                        pesos_equal = pd.Series(1.0 / len(cols_validas), index=cols_validas)
+                        # Performance-Weighted HRP Shrinkage (Sharpe-Weighted Adaptive Target)
+                        # En lugar de 1/N plano, encauza el capital hacia activos de mayor Sharpe reciente (últimos 100 días)
+                        SHRINKAGE_LAMBDA = 0.70
+                        rets_v = ventana_historica[cols_validas]
+                        std_v = rets_v.std()
+                        mean_v = rets_v.mean()
+                        sharpe_v = np.where(std_v > 0, (mean_v / std_v) * np.sqrt(252), 0.1)
+                        sharpe_v = np.maximum(0.05, sharpe_v)  # Piso de Sharpe positivo
+                        pesos_perf = pd.Series(sharpe_v / sharpe_v.sum(), index=cols_validas)
+                        
                         for col in cols_validas:
-                            pesos_hrp[col] = (1 - SHRINKAGE_LAMBDA) * pesos_hrp_validos[col] + SHRINKAGE_LAMBDA * pesos_equal[col]
+                            pesos_hrp[col] = (1 - SHRINKAGE_LAMBDA) * pesos_hrp_validos[col] + SHRINKAGE_LAMBDA * pesos_perf[col]
                         
                         # 2. Dynamic Bounds adaptables a N activos activos
                         N_act = len(cols_validas)
