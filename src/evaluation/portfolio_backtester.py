@@ -376,7 +376,9 @@ if __name__ == "__main__":
             print("No hay suficientes datos historicos para correr HRP.")
             return
             
-        pesos_hrp = pd.Series(1.0 / len(activos), index=activos)
+        activos_reales = list(series_retornos.keys())
+        n_activos_reales = len(activos_reales)
+        pesos_hrp = pd.Series(1.0 / n_activos_reales, index=activos_reales)
         
         # Pre-calcular SMA-200 para cada activo (Long-Cash filter)
         sma_signals = {}
@@ -412,9 +414,16 @@ if __name__ == "__main__":
                 if len(cols_validas) > 1:
                     try:
                         pesos_hrp_validos = hrp.allocate(ventana_historica[cols_validas])
-                        pesos_hrp = pd.Series(0.0, index=activos)
+                        pesos_hrp = pd.Series(0.0, index=activos_reales)
                         for col in cols_validas:
                             pesos_hrp[col] = pesos_hrp_validos[col]
+                        
+                        # Constrained HRP: Clamping post-optimización
+                        MAX_PESO = 0.40  # Ningún activo > 40%
+                        MIN_PESO = 0.05  # Ningún activo < 5%
+                        for col in pesos_hrp.index:
+                            pesos_hrp[col] = max(MIN_PESO, min(MAX_PESO, pesos_hrp[col]))
+                        pesos_hrp /= pesos_hrp.sum()  # Renormalizar a 1.0
                     except Exception as e:
                         pass # Usar pesos anteriores si falla la matriz
                         
@@ -425,7 +434,7 @@ if __name__ == "__main__":
             capital_hrp *= (1 + pnl_pct_hrp)
             
             # PnL Equivalente (1/N)
-            pnl_pct_eq = (retornos_dia.sum() / len(activos))
+            pnl_pct_eq = (retornos_dia.sum() / n_activos_reales)
             capital_eq *= (1 + pnl_pct_eq)
             
             # PnL 1/N + SMA-200 Filter (Mismo divisor len(activos) para comparativa justa sin apalancamiento artificial)
@@ -435,7 +444,7 @@ if __name__ == "__main__":
                 if act in sma_signals and i < len(sma_signals[act]) and sma_signals[act][i]:
                     sma_retorno += retornos_dia.get(act, 0.0)
             
-            pnl_pct_sma = sma_retorno / len(activos)
+            pnl_pct_sma = sma_retorno / n_activos_reales
             capital_sma *= (1 + pnl_pct_sma)
             
             historial_hrp.append(capital_hrp)
