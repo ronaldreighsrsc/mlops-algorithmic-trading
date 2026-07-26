@@ -54,6 +54,10 @@ class TradingBot:
         sym_code = abs(hash(self.symbol)) % 1000
         self.engine.magic_number = 100000 + sym_code * 10 + tf_code
 
+        # Auto-Rebalanceo Mensual Autónomo en Producción (AWS)
+        # Si han pasado >= 30 días, recalcula el Sharpe-Weighted HRP en caliente
+        TradingBot.check_and_auto_rebalance_hrp()
+
         # Cargar peso HRP asignado desde hrp_weights.json para alineación con el Portafolio Global
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         hrp_path = os.path.join(base_dir, "results", "hrp_weights.json")
@@ -609,6 +613,93 @@ class TradingBot:
         if not self.connector.connected:
             return
         self.check_for_signals()
+
+    @staticmethod
+    def check_and_auto_rebalance_hrp():
+        """
+        Módulo MLOps Institucional: Auto-Rebalanceo Mensual de Portafolio en AWS.
+        Verifica si han pasado >= 30 días desde la última actualización de hrp_weights.json.
+        Si es así, descarga la historia reciente de todos los activos, recalcula el 
+        Sharpe-Weighted Adaptive HRP (lambda=0.70) y actualiza hrp_weights.json en caliente.
+        """
+        import time
+        import json
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        results_dir = os.path.join(base_dir, "results")
+        hrp_path = os.path.join(results_dir, "hrp_weights.json")
+        
+        needs_rebalance = False
+        if not os.path.exists(hrp_path):
+            needs_rebalance = True
+        else:
+            mtime = os.path.getmtime(hrp_path)
+            days_old = (time.time() - mtime) / 86400.0
+            if days_old >= 30:
+                needs_rebalance = True
+                
+        if not needs_rebalance:
+            return
+            
+        logging.info("🔄 [AWS MLOps] INICIANDO AUTO-REBALANCEO MENSUAL DE PORTAFOLIO HRP EN CALIENTE...")
+        try:
+            import yfinance as yf
+            from evaluation.hrp_optimizer import HRPOptimizer
+            from datetime import datetime, timedelta
+            
+            end_date = datetime.now()
+            start_date = end_date - timedelta(days=180) # 100 días hábiles aprox
+            
+            activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+            returns_dict = {}
+            
+            ticker_map = {
+                "EURUSD": "EURUSD=X", "EURUSD_H4": "EURUSD=X",
+                "SP500": "^GSPC", "SP500_H4": "^GSPC",
+                "Oro": "GC=F", "Oro_H4": "GC=F",
+                "ECH": "ECH"
+            }
+            
+            for act in activos:
+                t = ticker_map.get(act, act)
+                df_act = yf.download(t, start=start_date, end=end_date, progress=False)
+                if not df_act.empty:
+                    close_col = df_act['Close'].iloc[:, 0] if isinstance(df_act.columns, pd.MultiIndex) else df_act['Close']
+                    returns_dict[act] = close_col.pct_change().fillna(0.0)
+                    
+            if len(returns_dict) > 1:
+                df_rets = pd.DataFrame(returns_dict).fillna(0.0)
+                ventana = df_rets.iloc[-100:]
+                cols = ventana.columns[ventana.std() > 0]
+                
+                if len(cols) > 1:
+                    hrp = HRPOptimizer()
+                    w_hrp_raw = hrp.allocate(ventana[cols])
+                    
+                    # Sharpe-Weighted Adaptive Shrinkage (lambda = 0.70)
+                    SHRINKAGE_LAMBDA = 0.70
+                    std_v = ventana[cols].std()
+                    mean_v = ventana[cols].mean()
+                    sharpe_v = np.where(std_v > 0, (mean_v / std_v) * np.sqrt(252), 0.1)
+                    sharpe_v = np.maximum(0.05, sharpe_v)
+                    w_perf = pd.Series(sharpe_v / sharpe_v.sum(), index=cols)
+                    
+                    w_final = pd.Series(0.0, index=activos)
+                    N_act = len(cols)
+                    w_min = 0.25 / N_act
+                    w_max = min(0.60, 2.0 / N_act)
+                    
+                    for col in cols:
+                        raw_w = (1 - SHRINKAGE_LAMBDA) * w_hrp_raw[col] + SHRINKAGE_LAMBDA * w_perf[col]
+                        w_final[col] = float(np.clip(raw_w, w_min, w_max))
+                        
+                    w_final = w_final / w_final.sum()
+                    
+                    pesos_dict = w_final.to_dict()
+                    with open(hrp_path, "w") as f:
+                        json.dump(pesos_dict, f, indent=4)
+                    logging.info(f"✅ [AWS MLOps] Auto-Rebalanceo HRP Ejecutado con Éxito. Pesos actualizados en {hrp_path}")
+        except Exception as e:
+            logging.error(f"Error durante Auto-Rebalanceo HRP: {e}")
 
 class MultiAssetBotManager:
     """Gestor maestro que controla múltiples bots (uno por cada activo) usando una sola conexión a MT5."""
