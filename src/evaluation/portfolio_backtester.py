@@ -317,8 +317,9 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
         print(f"⚠️ MLflow portfolio logging skipped: {ml_err}")
 
 
-    # Retornar la serie del activo (GRASP: Information Expert)
-    df_asset = pd.DataFrame({'cum_ret': cum_ret_series}, index=exit_times)
+    # Retornar la serie de capital real apalancado (Kelly + Walk-Forward MC MDD + RIESGO_PCT)
+    series_leveraged = pd.Series(historial_capital, index=fechas) / capital_inicial
+    df_asset = pd.DataFrame({'cum_ret': series_leveraged})
     df_asset = df_asset[~df_asset.index.duplicated(keep='last')]
     return df_asset['cum_ret']
 
