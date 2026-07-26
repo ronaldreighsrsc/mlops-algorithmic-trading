@@ -62,6 +62,8 @@ class TripleBarrierBacktester:
             return {k: 0 for k in ['Sharpe', 'VaR_95', 'CVaR_95', 'STARR', 'PSR', 'MDD', 'Skew', 'Kurt', 'Std', 'N']}
         
         mean_ret = np.mean(returns)
+        std_ret = np.std(returns)
+        
         # Sharpe por trade (sin anualizar) para el cálculo estadístico del PSR de López de Prado
         sr_raw = (mean_ret / std_ret) if std_ret != 0 else 0.0
         
