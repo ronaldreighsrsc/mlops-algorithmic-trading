@@ -54,8 +54,22 @@ class TradingBot:
         sym_code = abs(hash(self.symbol)) % 1000
         self.engine.magic_number = 100000 + sym_code * 10 + tf_code
 
-        # Presupuesto de riesgo dinámico por activo basado en Montecarlo
-        risk_pct = config.get("optimal_risk_pct", 0.025)
+        # Cargar peso HRP asignado desde hrp_weights.json para alineación con el Portafolio Global
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        hrp_path = os.path.join(base_dir, "results", "hrp_weights.json")
+        hrp_weight = 1.0
+        if os.path.exists(hrp_path):
+            try:
+                with open(hrp_path, 'r') as f:
+                    w_dict = json.load(f)
+                    hrp_weight = w_dict.get(self.symbol, 1.0)
+                    logging.info(f"[{self.symbol}] Peso HRP detectado: {hrp_weight:.2%}")
+            except Exception as e:
+                logging.warning(f"No se pudo leer hrp_weights.json: {e}")
+
+        # Presupuesto de riesgo dinámico por activo basado en Montecarlo y ponderado por HRP Global
+        base_risk = config.get("optimal_risk_pct", 0.035)
+        risk_pct = base_risk * hrp_weight
         
         self.risk_manager = RiskManager(
             risk_per_trade_pct=risk_pct,
