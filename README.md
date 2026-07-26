@@ -218,11 +218,11 @@ python src/evaluation/cpcv_auditor.py
 *Certifica matemáticamente que la estrategia del campeón NO fue fruto del sobreajuste (Overfitting) ni de la suerte. Aplica **Combinatorial Purged Cross-Validation (CPCV)** dividiendo la historia en combinaciones de caminos cruzados ($\binom{6}{2} = 15$ caminos) y calcula la **Probability of Backtest Overfitting (PBO)**. Genera el gráfico `cpcv_sharpe_distribution_{activo}.png` en `results/` y registra la distribución en MLflow.*
 
 
-### 4. Puesta en Producción (Live Trading)
+### 4. Puesta en Producción (Live Trading en AWS)
 ```bash
 python src/execution/main_bot.py
 ```
-*El ciclo de vida final. El bot carga al campeón desde su `.json` y extrae los pesos MLOps (`.keras`, `.pkl`). Ejecuta su **Shadow Journal** evaluando los últimos 300 días para auto-diagnosticar su salud (Cuarentena / Concept Drift). Si el diagnóstico es exitoso (`✅ Shadow Journal OK`), procesa la última vela de hoy, gestiona la Barrera Vertical (`Max Hold`), dispara la orden de compra/venta a MT5 y envía notificaciones por Telegram con la calculadora dual (Lotes MT5 y Trading Power exacto para ejecución manual en Quantfury).*
+*El ciclo de vida final. El bot carga al campeón desde su `.json` y extrae los pesos MLOps (`.keras`, `.pkl`). Ejecuta su **Shadow Journal** evaluando los últimos 300 días para auto-diagnosticar su salud (Cuarentena / Concept Drift). Implementa **Auto-Rebalanceo Mensual Autónomo (`check_and_auto_rebalance_hrp`)**: si detecta que han pasado $\ge 30$ días, recalcula dinámicamente el **Sharpe-Weighted Adaptive HRP ($\lambda=0.70$)** en caliente y actualiza `hrp_weights.json` sin interrumpir la ejecución. Si el diagnóstico es exitoso, procesa la última vela, gestiona la Barrera Vertical (`Max Hold`), dispara la orden a MT5 y notifica por Telegram.*
 
 ### 4b. Empaquetar para AWS (Generar `bot_production.zip`)
 ```bash
