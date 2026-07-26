@@ -153,8 +153,10 @@ python src/evaluation/portfolio_backtester.py
 > 1. **Fase 1 (Alpha Engine):** Ejecuta el torneo por activo, aplica el Pipeline de 2 Pasos (Gatekeepers + Composite Score), genera los reportes HTML (`backtest_report_*.html`) y elige los modelos campeones (`campeon_*.json`).
 > 2. **Fase 2 (Portfolio Engine):** Toma los campeones de la Fase 1, simula la Billetera Real en USD con Apalancamiento Kelly Dinámico, calcula los pesos **HRP (López de Prado)** y exporta `hrp_weights.json` listo para despliegue en AWS.
 
-#### 🔄 Modos de Ejecución MLOps (`FAST_MODE` en `portfolio_backtester.py`):
-- **Evaluación Rápida (`FAST_MODE = True`):** (**Ultra-Rápido con Caching en RAM**). Utiliza una arquitectura de **Cache en Memoria RAM (`_MLOPS_CACHE`)** para almacenar la deserialización de grafos de TensorFlow/HMM y eliminar operaciones I/O de disco repetitivas, ejecutando la evaluación global en segundos.
+#### 🔄 Modos de Ejecución MLOps & Arquitectura de Aceleración (`portfolio_backtester.py`):
+- **Evaluación Rápida (`FAST_MODE = True`):** (**Ultra-Rápido con Doble Caching en RAM**). Implementa una arquitectura de **Aceleración MLOps de 2 Capas**:
+  1. **Cache de Grafos (`_MLOPS_CACHE`):** Almacena las deserializaciones de redes neuronales de TensorFlow y modelos Gaussian HMM en memoria RAM, eliminando cuellos de botella de I/O de disco duro.
+  2. **Memoización de Inferencia (`_inference_cache`):** Indexa por hash binario (`tobytes()`) las ventanas de métricas de trades (`X_window`), reutilizando predicciones deterministas en 0.000001s para evitar pasadas de propagación hacia adelante redundantes en CPU durante la simulación de múltiples umbrales.
 - **Re-entrenamiento MLOps Anual (`FAST_MODE = False`):** (~1 hora). Entrena los modelos de detección de anomalías (HMM y LSTM Autoencoder) desde cero para cada combinación en `results/mlops_monitors/`.
 
 #### 🎲 Eliminación de Lookahead Bias: Walk-Forward Rolling MC MDD
