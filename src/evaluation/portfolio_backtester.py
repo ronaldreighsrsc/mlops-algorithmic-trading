@@ -418,9 +418,20 @@ if __name__ == "__main__":
                         for col in cols_validas:
                             pesos_hrp[col] = pesos_hrp_validos[col]
                         
-                        # Constrained HRP: Clamping post-optimización
-                        MAX_PESO = 0.40  # Ningún activo > 40%
-                        MIN_PESO = 0.05  # Ningún activo < 5%
+                        # Adaptive HRP Shrinkage + Dynamic Clamping
+                        # 1. Shrinkage Bayesiano hacia 1/N (lambda = 0.25)
+                        # Combina la matriz de covarianza descorrelacionada HRP con el equi-peso 1/N
+                        # para asegurar que activos de alto Alpha no queden hiper-penalizados por su volatilidad.
+                        SHRINKAGE_LAMBDA = 0.25
+                        pesos_equal = pd.Series(1.0 / len(cols_validas), index=cols_validas)
+                        for col in cols_validas:
+                            pesos_hrp[col] = (1 - SHRINKAGE_LAMBDA) * pesos_hrp_validos[col] + SHRINKAGE_LAMBDA * pesos_equal[col]
+                        
+                        # 2. Dynamic Bounds adaptables a N activos activos
+                        N_act = len(cols_validas)
+                        MIN_PESO = 0.25 / N_act                         # p.ej. N=5 -> 5%, N=2 -> 12.5%
+                        MAX_PESO = min(0.60, 2.0 / N_act)              # p.ej. N=5 -> 40%, N=2 -> 60%
+                        
                         for col in pesos_hrp.index:
                             pesos_hrp[col] = max(MIN_PESO, min(MAX_PESO, pesos_hrp[col]))
                         pesos_hrp /= pesos_hrp.sum()  # Renormalizar a 1.0
@@ -437,7 +448,7 @@ if __name__ == "__main__":
             pnl_pct_eq = (retornos_dia.sum() / n_activos_reales)
             capital_eq *= (1 + pnl_pct_eq)
             
-            # PnL 1/N + SMA-200 Filter (Mismo divisor len(activos) para comparativa justa sin apalancamiento artificial)
+            # PnL 1/N + SMA-200 Filter
             activos_con_signal = list(series_retornos.keys())
             sma_retorno = 0.0
             for act in activos_con_signal:
@@ -472,48 +483,71 @@ if __name__ == "__main__":
         roi_eq, cagr_eq, sharpe_eq, starr_eq, mdd_eq = _calc_metrics(historial_eq)
         roi_sma, cagr_sma, sharpe_sma, starr_sma, mdd_sma = _calc_metrics(historial_sma)
 
-        # Cargar SP500 Buy & Hold puro para comparativa directa
-        sp500_roi_str, sp500_cagr_str, sp500_sharpe_str, sp500_starr_str, sp500_mdd_str = "19.12%", "6.0%", "1.21", "0.32", "-18.99%"
+        # Cargar SP500 Buy & Hold e SP500 SMA-200 para comparativa directa
+        sp500_bh_cap = [capital_inicial]
+        sp500_sma_cap = [capital_inicial]
+        
         try:
             sp_path = os.path.join(data_dir, "raw", "SP500_daily.csv")
             if os.path.exists(sp_path):
                 df_sp = pd.read_csv(sp_path)
                 if 'time' in df_sp.columns:
                     df_sp['time'] = pd.to_datetime(df_sp['time'])
-                    df_sp_test = df_sp[(df_sp['time'] >= fechas_sim[0]) & (df_sp['time'] <= fechas_sim[-1])].copy()
-                    if not df_sp_test.empty:
-                        sp_closes = df_sp_test['close'].values
-                        sp_rets = np.diff(sp_closes) / sp_closes[:-1]
-                        sp_std = np.std(sp_rets)
-                        sp_sharpe = (np.mean(sp_rets) / sp_std) * np.sqrt(252) if sp_std > 0 else 0.0
-                        sp_s = pd.Series((1 + sp_rets).cumprod())
-                        sp_mdd = ((sp_s - sp_s.cummax()) / sp_s.cummax()).min()
-                        sp_roi = (sp_closes[-1] / sp_closes[0]) - 1
-                        sp_cagr = (1 + sp_roi)**(1 / anios_test) - 1 if sp_roi > -1.0 else -1.0
-                        sp_starr = sp_cagr / abs(sp_mdd) if abs(sp_mdd) > 0 else 0.0
-                        sp500_roi_str = f"{sp_roi:.2%}"
-                        sp500_cagr_str = f"{sp_cagr:.2%}"
-                        sp500_sharpe_str = f"{sp_sharpe:.2f}"
-                        sp500_starr_str = f"{sp_starr:.2f}"
-                        sp500_mdd_str = f"{sp_mdd:.2%}"
-        except Exception:
+                    df_sp.sort_values('time', inplace=True)
+                    
+                    # Pre-calcular SMA-200 sobre toda la historia del SP500
+                    sp_closes_all = df_sp['close'].values
+                    sp_sma200_all = pd.Series(sp_closes_all).rolling(window=200).mean().values
+                    df_sp['sma200'] = sp_sma200_all
+                    
+                    # Sincronizar fechas exactas con fechas_sim
+                    df_sp_sim = df_sp[df_sp['time'].isin(fechas_sim)].copy()
+                    if len(df_sp_sim) > 1:
+                        sp_c = df_sp_sim['close'].values
+                        sp_sma = df_sp_sim['sma200'].values
+                        
+                        sp_bh_cum = (sp_c / sp_c[0]) * capital_inicial
+                        sp500_bh_cap = list(sp_bh_cum)
+                        
+                        # SP500 SMA-200 Filter
+                        cap_sp_sma = capital_inicial
+                        sp500_sma_cap = [capital_inicial]
+                        for idx_sp in range(1, len(sp_c)):
+                            ret_sp = (sp_c[idx_sp] / sp_c[idx_sp-1]) - 1.0
+                            # Si close anterior > sma200 anterior -> estar comprado en SP500
+                            if not np.isnan(sp_sma[idx_sp-1]) and sp_c[idx_sp-1] > sp_sma[idx_sp-1]:
+                                cap_sp_sma *= (1 + ret_sp)
+                            sp500_sma_cap.append(cap_sp_sma)
+        except Exception as e:
             pass
+
+        # Si no se pudo alinear por fechas, rellenar con fallback
+        if len(sp500_bh_cap) != len(historial_hrp):
+            sp500_bh_cap = [capital_inicial] * len(historial_hrp)
+        if len(sp500_sma_cap) != len(historial_hrp):
+            sp500_sma_cap = [capital_inicial] * len(historial_hrp)
+
+        roi_sp_bh, cagr_sp_bh, sharpe_sp_bh, starr_sp_bh, mdd_sp_bh = _calc_metrics(sp500_bh_cap)
+        roi_sp_sma, cagr_sp_sma, sharpe_sp_sma, starr_sp_sma, mdd_sp_sma = _calc_metrics(sp500_sma_cap)
 
         print(f"\n📊 RESULTADOS COMPARATIVOS GLOBAL PORTFOLIO (Rebalanceo Mensual)")
         print(f"{'='*95}")
         print(f"{'ESTRATEGIA / BENCHMARK':<32} | {'ROI TOTAL':<10} | {'CAGR':<8} | {'SHARPE':<8} | {'STARR':<8} | {'MAX DRAWDOWN':<12}")
         print(f"{'-'*95}")
         print(f"{'Portafolio HRP (Tu Bot ML)':<32} | {roi_hrp:>10.2%} | {cagr_hrp:>8.2%} | {sharpe_hrp:>8.2f} | {starr_hrp:>8.2f} | {mdd_hrp:>12.2%}")
-        print(f"{'Indexado 100% SP500 (Buy & Hold)':<32} | {sp500_roi_str:>10} | {sp500_cagr_str:>8} | {sp500_sharpe_str:>8} | {sp500_starr_str:>8} | {sp500_mdd_str:>12}")
+        print(f"{'Indexado 100% SP500 (Buy & Hold)':<32} | {roi_sp_bh:>10.2%} | {cagr_sp_bh:>8.2%} | {sharpe_sp_bh:>8.2f} | {starr_sp_bh:>8.2f} | {mdd_sp_bh:>12.2%}")
+        print(f"{'SP500 + SMA-200 (Trend Following)':<32} | {roi_sp_sma:>10.2%} | {cagr_sp_sma:>8.2%} | {sharpe_sp_sma:>8.2f} | {starr_sp_sma:>8.2f} | {mdd_sp_sma:>12.2%}")
         print(f"{'Portafolio 1/N (Mercado Cesta)':<32} | {roi_eq:>10.2%} | {cagr_eq:>8.2%} | {sharpe_eq:>8.2f} | {starr_eq:>8.2f} | {mdd_eq:>12.2%}")
         print(f"{'Portafolio 1/N + SMA-200':<32} | {roi_sma:>10.2%} | {cagr_sma:>8.2%} | {sharpe_sma:>8.2f} | {starr_sma:>8.2f} | {mdd_sma:>12.2%}")
         print(f"{'='*95}\n")
         
         plt.figure(figsize=(12, 6))
         plt.plot(fechas_sim, historial_hrp, label=f'Portafolio HRP (Tu Bot ML) - ROI: {roi_hrp:.2%} | Sharpe: {sharpe_hrp:.2f}', color='blue', linewidth=2.5)
-        plt.plot(fechas_sim, historial_eq, label=f'Portafolio 1/N (Tradicional) - ROI: {roi_eq:.2%} | Sharpe: {sharpe_eq:.2f}', color='gray', linestyle='--', linewidth=2)
-        plt.plot(fechas_sim, historial_sma, label=f'Portafolio 1/N + SMA-200 - ROI: {roi_sma:.2%} | Sharpe: {sharpe_sma:.2f}', color='#10b981', linestyle='--', linewidth=2)
-        plt.title("HRP vs Equally Weighted vs SMA-200 Portfolio Backtest", fontsize=15, fontweight='bold')
+        plt.plot(fechas_sim, sp500_bh_cap, label=f'Indexado 100% SP500 (Buy & Hold) - ROI: {roi_sp_bh:.2%} | Sharpe: {sharpe_sp_bh:.2f}', color='red', linestyle=':', linewidth=2)
+        plt.plot(fechas_sim, sp500_sma_cap, label=f'SP500 + SMA-200 (Trend Following) - ROI: {roi_sp_sma:.2%} | Sharpe: {sharpe_sp_sma:.2f}', color='orange', linestyle='-.', linewidth=2)
+        plt.plot(fechas_sim, historial_eq, label=f'Portafolio 1/N (Tradicional) - ROI: {roi_eq:.2%} | Sharpe: {sharpe_eq:.2f}', color='gray', linestyle='--', linewidth=1.5)
+        plt.plot(fechas_sim, historial_sma, label=f'Portafolio 1/N + SMA-200 - ROI: {roi_sma:.2%} | Sharpe: {sharpe_sma:.2f}', color='#10b981', linestyle='--', linewidth=1.5)
+        plt.title("HRP vs SP500 vs 1/N Benchmarks Portfolio Backtest", fontsize=15, fontweight='bold')
         plt.ylabel("Capital en Dólares ($USD)")
         plt.grid(True, linestyle=':', alpha=0.6)
         plt.legend(fontsize=9)
