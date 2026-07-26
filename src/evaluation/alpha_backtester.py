@@ -419,19 +419,35 @@ class TripleBarrierBacktester:
                 ae_save_path = os.path.join(mlops_dir, f"{mlops_prefix}_autoencoder")
                 
                 if self.fast_mode:
-                    # === MODO RÁPIDO: Cargar modelos MLOps pre-entrenados ===
+                    # === MODO RÁPIDO: Cargar modelos MLOps pre-entrenados con Cache en RAM ===
                     if not os.path.exists(f"{ae_save_path}.keras"):
                         # Sin Autoencoder guardado → No competir sin escudo MLOps
                         continue
+                        
+                    global _MLOPS_CACHE
+                    if '_MLOPS_CACHE' not in globals():
+                        _MLOPS_CACHE = {}
+
                     if macro_cols and os.path.exists(hmm_save_path):
-                        from models.anomaly_detector import HMMRegimeDetector
-                        hybrid_monitor.hmm_model = HMMRegimeDetector(n_components=3)
-                        hybrid_monitor.hmm_model.load(hmm_save_path)
-                        print(f"  ⚡ HMM cargado desde disco para {modelo} ({banco})")
-                    from models.anomaly_detector import StrategyLSTMAutoencoder
-                    hybrid_monitor.lstm_model = StrategyLSTMAutoencoder()
-                    hybrid_monitor.lstm_model.load(ae_save_path)
-                    print(f"  ⚡ Autoencoder cargado desde disco para {modelo} ({banco})")
+                        if hmm_save_path in _MLOPS_CACHE:
+                            hybrid_monitor.hmm_model = _MLOPS_CACHE[hmm_save_path]
+                        else:
+                            from models.anomaly_detector import HMMRegimeDetector
+                            hmm_mod = HMMRegimeDetector(n_components=3)
+                            hmm_mod.load(hmm_save_path)
+                            _MLOPS_CACHE[hmm_save_path] = hmm_mod
+                            hybrid_monitor.hmm_model = hmm_mod
+                            print(f"  ⚡ HMM cargado a RAM para {modelo} ({banco})")
+
+                    if ae_save_path in _MLOPS_CACHE:
+                        hybrid_monitor.lstm_model = _MLOPS_CACHE[ae_save_path]
+                    else:
+                        from models.anomaly_detector import StrategyLSTMAutoencoder
+                        ae_mod = StrategyLSTMAutoencoder()
+                        ae_mod.load(ae_save_path)
+                        _MLOPS_CACHE[ae_save_path] = ae_mod
+                        hybrid_monitor.lstm_model = ae_mod
+                        print(f"  ⚡ Autoencoder cargado a RAM para {modelo} ({banco})")
                 else:
                     # === MODO FULL: Entrenar desde cero y guardar a disco ===
                     if os.path.exists(train_probs_path):

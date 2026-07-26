@@ -154,7 +154,7 @@ python src/evaluation/portfolio_backtester.py
 > 2. **Fase 2 (Portfolio Engine):** Toma los campeones de la Fase 1, simula la Billetera Real en USD con Apalancamiento Kelly Dinámico, calcula los pesos **HRP (López de Prado)** y exporta `hrp_weights.json` listo para despliegue en AWS.
 
 #### 🔄 Modos de Ejecución MLOps (`FAST_MODE` en `portfolio_backtester.py`):
-- **Evaluación Rápida (`FAST_MODE = True`):** (~2 minutos - **Modo por defecto**). Carga los Autoencoders y HMMs pre-entrenados desde `results/mlops_monitors/` en segundos para simular el capital en USD, calcular el HRP y generar los archivos de campeones.
+- **Evaluación Rápida (`FAST_MODE = True`):** (**Ultra-Rápido con Caching en RAM**). Utiliza una arquitectura de **Cache en Memoria RAM (`_MLOPS_CACHE`)** para almacenar la deserialización de grafos de TensorFlow/HMM y eliminar operaciones I/O de disco repetitivas, ejecutando la evaluación global en segundos.
 - **Re-entrenamiento MLOps Anual (`FAST_MODE = False`):** (~1 hora). Entrena los modelos de detección de anomalías (HMM y LSTM Autoencoder) desde cero para cada combinación en `results/mlops_monitors/`.
 
 #### 🎲 Eliminación de Lookahead Bias: Walk-Forward Rolling MC MDD
