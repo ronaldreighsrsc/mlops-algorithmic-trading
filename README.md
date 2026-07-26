@@ -135,6 +135,11 @@ python src/main_preprocessing.py
 ```
 *Se conecta a MT5 y Yahoo Finance para extraer velas desde el año 2000 en múltiples temporalidades descorrelacionadas (`D1`, `H4`, `H1`). Aplica FFD, EGARCH, Triple Barrera y alineamiento `ffill` de exógenas macro (VIX, DXY, Yield10Y, Macro Chile), manteniendo compatibilidad retroactiva por defecto con `D1`.*
 
+#### 🌐 Ingeniería Macro Híbrida para Detección de Regímenes con HMM:
+Para evitar el sesgo por falta de estacionariedad en modelos Gaussianos HMM (`HMMRegimeDetector`):
+- **Series Naturalmente Estacionarias (`VIX_close`):** Se mantienen en nivel bruto sin FFD, al ser series de reversión a la media (*Mean-Reverting*) que oscilan en un rango fijo (12-80).
+- **Series Macro de Largo Plazo (`DXY_close_FFD`, `Yield10Y_FFD`, `SP500_FFD`):** Se transforman mediante **Diferenciación Fraccionada (FFD)** para eliminar tendencias de largo plazo (garantizando estacionariedad Gaussiana) sin destruir la memoria histórica. Esto permite al HMM identificar regímenes de crisis de manera 100% insesgada a través de las décadas.
+
 
 ### 2. El "Retuning" Maestro (Generar Obreros con Optuna)
 ```bash
