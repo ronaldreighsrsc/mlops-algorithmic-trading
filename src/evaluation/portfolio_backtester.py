@@ -131,13 +131,12 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
         accumulated_returns.append(retorno_raw)
         if len(accumulated_returns) >= RECALIB_EVERY and len(accumulated_returns) % RECALIB_EVERY == 0:
             arr_wf = np.array(accumulated_returns)
-            mdd_sims = []
-            for _ in range(N_SIMS_WALKFORWARD):
-                sim = np.random.choice(arr_wf, size=len(arr_wf), replace=True)
-                cum = (1 + sim).cumprod()
-                peak = np.maximum.accumulate(cum)
-                dd = (cum - peak) / peak
-                mdd_sims.append(dd.min())
+            # Vectorización NumPy 2D (100x más rápido que for-loop Python)
+            sims_mat = np.random.choice(arr_wf, size=(N_SIMS_WALKFORWARD, len(arr_wf)), replace=True)
+            cum_mat = np.cumprod(1.0 + sims_mat, axis=1)
+            peak_mat = np.maximum.accumulate(cum_mat, axis=1)
+            dd_mat = (cum_mat - peak_mat) / peak_mat
+            mdd_sims = dd_mat.min(axis=1)
             mc_mdd_rolling = np.percentile(mdd_sims, 5)
             abs_mc = max(0.05, abs(mc_mdd_rolling))
             riesgo_base_activo = float(np.clip((0.15 / abs_mc) * 0.025, 0.01, 0.035))
