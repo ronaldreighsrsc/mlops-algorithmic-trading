@@ -73,6 +73,13 @@ class StrategyLSTMAutoencoder:
 
     def is_anomalous(self, X_window: np.ndarray) -> bool:
         """Determina si la ventana actual de trades es anómala (Kill-Switch)."""
+        if not hasattr(self, '_inference_cache'):
+            self._inference_cache = {}
+            
+        key = X_window.tobytes()
+        if key in self._inference_cache:
+            return self._inference_cache[key]
+            
         if len(X_window.shape) == 1:
             X_window = X_window.reshape(1, -1)
             
@@ -84,7 +91,9 @@ class StrategyLSTMAutoencoder:
         mse = np.mean(np.power(X_3d - reconstructed, 2), axis=(1, 2))
         
         # Si el error es mayor al umbral P99 de entrenamiento, es anómalo
-        return bool(mse[0] > self._threshold_mse)
+        res = bool(mse[0] > self._threshold_mse)
+        self._inference_cache[key] = res
+        return res
 
     def check_concept_drift(self, recent_X_window: np.ndarray) -> bool:
         """
