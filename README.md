@@ -163,7 +163,7 @@ python src/evaluation/portfolio_backtester.py
 
 El **Monte Carlo MDD 95%** es la métrica que dimensiona cuánto capital arriesgar por trade (Position Sizing). Sin embargo, calcular el MC MDD al final del período Out-of-Sample (OOS) y usarlo desde el primer trade introduce un **Lookahead Bias** (el backtest "ve el futuro" para dimensionar trades pasados).
 
-Para eliminar este sesgo, `portfolio_backtester.py` implementa un **Walk-Forward Rolling MC MDD**:
+Para eliminar este sesgo, `portfolio_backtester.py` implementa un **Walk-Forward Rolling MC MDD (Acelerado por Vectorización Matricial 2D en NumPy)**. La simulación de 1,000 permutaciones resampleadas no utiliza bucles `for` de Python, sino operaciones matriciales `2D NumPy` (`size=(1000, N)`), ejecutando 50,000 trayectorias estocásticas en milisegundos a nivel C-BLAS:
 
 | Período | MC MDD Utilizado | Lógica |
 |---|---|---|
