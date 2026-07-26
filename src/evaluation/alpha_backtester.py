@@ -62,10 +62,11 @@ class TripleBarrierBacktester:
             return {k: 0 for k in ['Sharpe', 'VaR_95', 'CVaR_95', 'STARR', 'PSR', 'MDD', 'Skew', 'Kurt', 'Std', 'N']}
         
         mean_ret = np.mean(returns)
-        std_ret = np.std(returns)
+        # Sharpe por trade (sin anualizar) para el cálculo estadístico del PSR de López de Prado
+        sr_raw = (mean_ret / std_ret) if std_ret != 0 else 0.0
         
-        # Sharpe anualizado (asumimos ~252 dias de trading al anio)
-        sharpe = (mean_ret / std_ret) * np.sqrt(252) if std_ret != 0 else 0
+        # Sharpe anualizado (asumimos ~252 días de trading al año)
+        sharpe = sr_raw * np.sqrt(252) if std_ret != 0 else 0.0
         
         var_level = np.percentile(returns, (1 - confidence) * 100)
         cvar_level = returns[returns <= var_level].mean() if len(returns[returns <= var_level]) > 0 else 0
@@ -76,8 +77,11 @@ class TripleBarrierBacktester:
             return {'Sharpe': sharpe, 'VaR_95': var_level, 'CVaR_95': cvar_level, 'STARR': starr, 'PSR': 0, 'MDD': 0, 'Skew': 0, 'Kurt': 0, 'Std': std_ret, 'N': n}
             
         skew_ret, kurt_ret = skew(returns), kurtosis(returns)
-        sigma_sr = np.sqrt((1 / (n - 1)) * (1 + 0.5 * sharpe**2 - skew_ret * sharpe + (kurt_ret / 4) * sharpe**2))
-        psr = norm.cdf(sharpe / sigma_sr) if sigma_sr != 0 else 0
+        
+        # Varianza del Sharpe usando el Sharpe por trade (López de Prado 2012)
+        var_sr = (1 / (n - 1)) * (1 + 0.5 * (sr_raw**2) - skew_ret * sr_raw + (kurt_ret / 4) * (sr_raw**2))
+        sigma_sr = np.sqrt(max(1e-9, var_sr))
+        psr = float(norm.cdf(sr_raw / sigma_sr)) if sigma_sr > 0 else 0.0
         
         cum_series = pd.Series(cum_returns)
         running_max = cum_series.cummax()
