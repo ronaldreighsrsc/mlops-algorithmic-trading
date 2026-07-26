@@ -176,6 +176,26 @@ Para eliminar este sesgo, `portfolio_backtester.py` implementa un **Walk-Forward
 > - **En producción (AWS)**, el bot arranca con el MC MDD del OOS completo (legítimo, ya que al desplegar ya se observó todo el OOS) → tiene **mejor información desde el día 1**.
 > - Si el backtest pesimista ya es rentable, producción lo será **igual o más**. Esta asimetría es una característica de diseño, no un defecto.
 
+#### 🏛️ Asignación de Portafolio Avanzada: Adaptive HRP Shrinkage & S&P 500 Benchmarks
+
+Para evitar que la volatilidad de ciertos activos castigue injustamente a campeones de alto Alpha (como ECH u Oro) y adaptar el rebalanceo a cualquier número variable $N$ de activos activos ($N=1, 2, 3, 5, 7...$), el motor utiliza **HRP Shrinkage Bayesiano**:
+
+1. **Shrinkage Bayesiano hacia $1/N$ ($\lambda = 0.25$):**  
+   $$w_{\text{final}} = 0.75 \cdot w_{\text{HRP}} + 0.25 \cdot w_{1/N}$$
+   Combina la estructura de covarianza descorrelacionada de López de Prado (2016) con la regla de diversificación de DeMiguel et al. (2009). Esto previene que el HRP caiga en la trampa de hiper-concentrar capital únicamente en activos de baja volatilidad histórica (como Forex).
+
+2. **Límites Dinámicos Adaptables a $N$ ($Dynamic Clamping$):**  
+   Los límites máximo y mínimo de peso por activo se recalculan automáticamente en función de la cantidad $N$ de campeones activos:
+   $$w_{\min} = \frac{0.25}{N} \qquad \text{y} \qquad w_{\max} = \min\left(0.60, \; \frac{2.0}{N}\right)$$
+   *(Para $N=5$: Mín 5%, Máx 40%. Para $N=2$: Mín 12.5%, Máx 60%).*
+
+3. **Benchmarks Directos del S&P 500:**  
+   El portafolio global evalúa automáticamente su desempeño contra 4 competidores institucionales:
+   - **`Portafolio HRP (Tu Bot ML)`**
+   - **`Indexado 100% SP500 (Buy & Hold)`**
+   - **`SP500 + SMA-200 (Trend Following)`**
+   - **`Portafolio 1/N (Mercado Cesta)`** y **`Portafolio 1/N + SMA-200`**
+
 > 💡 **(Opcional) Alpha Backtester Rápido (`alpha_backtester.py`):**  
 > Si solo quieres analizar el Alpha bruto de un activo individual sin pasar por la simulación de billetera ni el HRP global, puedes ejecutar opcionalmente: `python src/evaluation/alpha_backtester.py`.
 
