@@ -222,7 +222,9 @@ python src/evaluation/cpcv_auditor.py
 ```bash
 python src/execution/main_bot.py
 ```
-*El ciclo de vida final. El bot carga al campeón desde su `.json` y extrae los pesos MLOps (`.keras`, `.pkl`). Ejecuta su **Shadow Journal** evaluando los últimos 300 días para auto-diagnosticar su salud (Cuarentena / Concept Drift). Implementa **Auto-Rebalanceo Mensual Autónomo (`check_and_auto_rebalance_hrp`)**: si detecta que han pasado $\ge 30$ días, recalcula dinámicamente el **Sharpe-Weighted Adaptive HRP ($\lambda=0.70$)** en caliente y actualiza `hrp_weights.json` sin interrumpir la ejecución. Si el diagnóstico es exitoso, procesa la última vela, gestiona la Barrera Vertical (`Max Hold`), dispara la orden a MT5 y notifica por Telegram.*
+*El ciclo de vida final en producción 24/7. Implementa una **Arquitectura MLOps Doble de Autonomía en Vivo**:
+1. **Auto-Rebalanceo Mensual HRP (`check_and_auto_rebalance_hrp`):** Si transcurren $\ge 30$ días, recalcula en caliente el **Sharpe-Weighted Adaptive HRP ($\lambda=0.70$)** sobre la historia reciente de 100 días y actualiza `hrp_weights.json` sin interrumpir la ejecución.
+2. **Recalibración Continua Bayesiana MC MDD (`recalibrate_live_mc_mdd`):** Opera desde el Día 1 con el `optimal_risk_pct` del OOS completo (sin penalización por arranque frío). Cada 30 operaciones reales ejecutadas en vivo en AWS, fusiona los trades en vivo con la historia previa y vuelve a correr 1,000 permutaciones estocásticas de Monte Carlo (NumPy 2D) para re-dimensionar dinámicamente el presupuesto de riesgo en `campeon_{symbol}.json` en caliente.*
 
 ### 4b. Empaquetar para AWS (Generar `bot_production.zip`)
 ```bash
