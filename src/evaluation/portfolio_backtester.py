@@ -329,7 +329,7 @@ if __name__ == "__main__":
     # ==============================================================================
     CAPITAL = 10000.0        # USD en tu broker
     RIESGO_PCT = 0.025       # 2.5% riesgo base por trade
-    FAST_MODE = False    # True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
+    FAST_MODE = True# True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
     
     activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
 
@@ -500,24 +500,32 @@ if __name__ == "__main__":
                     sp_sma200_all = pd.Series(sp_closes_all).rolling(window=200).mean().values
                     df_sp['sma200'] = sp_sma200_all
                     
-                    # Sincronizar fechas exactas con fechas_sim
-                    df_sp_sim = df_sp[df_sp['time'].isin(fechas_sim)].copy()
-                    if len(df_sp_sim) > 1:
-                        sp_c = df_sp_sim['close'].values
-                        sp_sma = df_sp_sim['sma200'].values
+                    # Sincronizar fechas usando rango temporal y reindex/ffill
+                    t_start = pd.to_datetime(fechas_sim[0])
+                    t_end = pd.to_datetime(fechas_sim[-1])
+                    df_sp_test = df_sp[(df_sp['time'] >= t_start) & (df_sp['time'] <= t_end)].copy()
+                    
+                    if len(df_sp_test) > 1:
+                        df_sp_test.set_index('time', inplace=True)
+                        # Reindexar a las fechas exactas de la simulación con ffill
+                        sim_idx = pd.to_datetime(fechas_sim)
+                        df_sp_reindexed = df_sp_test.reindex(sim_idx, method='ffill').bfill()
                         
-                        sp_bh_cum = (sp_c / sp_c[0]) * capital_inicial
-                        sp500_bh_cap = list(sp_bh_cum)
+                        sp_c = df_sp_reindexed['close'].values
+                        sp_sma = df_sp_reindexed['sma200'].values
                         
-                        # SP500 SMA-200 Filter
-                        cap_sp_sma = capital_inicial
-                        sp500_sma_cap = [capital_inicial]
-                        for idx_sp in range(1, len(sp_c)):
-                            ret_sp = (sp_c[idx_sp] / sp_c[idx_sp-1]) - 1.0
-                            # Si close anterior > sma200 anterior -> estar comprado en SP500
-                            if not np.isnan(sp_sma[idx_sp-1]) and sp_c[idx_sp-1] > sp_sma[idx_sp-1]:
-                                cap_sp_sma *= (1 + ret_sp)
-                            sp500_sma_cap.append(cap_sp_sma)
+                        if len(sp_c) == len(fechas_sim):
+                            sp_bh_cum = (sp_c / sp_c[0]) * capital_inicial
+                            sp500_bh_cap = list(sp_bh_cum)
+                            
+                            # SP500 SMA-200 Filter
+                            cap_sp_sma = capital_inicial
+                            sp500_sma_cap = [capital_inicial]
+                            for idx_sp in range(1, len(sp_c)):
+                                ret_sp = (sp_c[idx_sp] / sp_c[idx_sp-1]) - 1.0
+                                if not np.isnan(sp_sma[idx_sp-1]) and sp_c[idx_sp-1] > sp_sma[idx_sp-1]:
+                                    cap_sp_sma *= (1 + ret_sp)
+                                sp500_sma_cap.append(cap_sp_sma)
         except Exception as e:
             pass
 
