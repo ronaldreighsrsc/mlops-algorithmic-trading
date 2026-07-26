@@ -419,10 +419,10 @@ if __name__ == "__main__":
                             pesos_hrp[col] = pesos_hrp_validos[col]
                         
                         # Adaptive HRP Shrinkage + Dynamic Clamping
-                        # 1. Shrinkage Bayesiano hacia 1/N (lambda = 0.25)
-                        # Combina la matriz de covarianza descorrelacionada HRP con el equi-peso 1/N
+                        # 1. Shrinkage Bayesiano hacia 1/N (lambda = 0.40)
+                        # Combina la matriz de covarianza descorrelacionada HRP (60%) con el equi-peso 1/N (40%)
                         # para asegurar que activos de alto Alpha no queden hiper-penalizados por su volatilidad.
-                        SHRINKAGE_LAMBDA = 0.25
+                        SHRINKAGE_LAMBDA = 0.40
                         pesos_equal = pd.Series(1.0 / len(cols_validas), index=cols_validas)
                         for col in cols_validas:
                             pesos_hrp[col] = (1 - SHRINKAGE_LAMBDA) * pesos_hrp_validos[col] + SHRINKAGE_LAMBDA * pesos_equal[col]

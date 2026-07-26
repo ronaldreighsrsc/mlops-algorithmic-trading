@@ -180,8 +180,8 @@ Para eliminar este sesgo, `portfolio_backtester.py` implementa un **Walk-Forward
 
 Para evitar que la volatilidad de ciertos activos castigue injustamente a campeones de alto Alpha (como ECH u Oro) y adaptar el rebalanceo a cualquier número variable $N$ de activos activos ($N=1, 2, 3, 5, 7...$), el motor utiliza **HRP Shrinkage Bayesiano**:
 
-1. **Shrinkage Bayesiano hacia $1/N$ ($\lambda = 0.25$):**  
-   $$w_{\text{final}} = 0.75 \cdot w_{\text{HRP}} + 0.25 \cdot w_{1/N}$$
+1. **Shrinkage Bayesiano hacia $1/N$ ($\lambda = 0.40$):**  
+   $$w_{\text{final}} = 0.60 \cdot w_{\text{HRP}} + 0.40 \cdot w_{1/N}$$
    Combina la estructura de covarianza descorrelacionada de López de Prado (2016) con la regla de diversificación de DeMiguel et al. (2009). Esto previene que el HRP caiga en la trampa de hiper-concentrar capital únicamente en activos de baja volatilidad histórica (como Forex).
 
 2. **Límites Dinámicos Adaptables a $N$ ($Dynamic Clamping$):**  
