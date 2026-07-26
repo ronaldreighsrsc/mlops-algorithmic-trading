@@ -72,7 +72,9 @@ class TradingBot:
                 logging.warning(f"No se pudo leer hrp_weights.json: {e}")
 
         # Presupuesto de riesgo dinámico por activo basado en Montecarlo y ponderado por HRP Global
-        base_risk = config.get("optimal_risk_pct", 0.035)
+        self.hrp_weight = hrp_weight
+        self.results_dir = os.path.join(base_dir, "results")
+        base_risk = config.get("optimal_risk_pct", 0.045)
         risk_pct = base_risk * hrp_weight
         
         self.risk_manager = RiskManager(
@@ -695,11 +697,57 @@ class TradingBot:
                     w_final = w_final / w_final.sum()
                     
                     pesos_dict = w_final.to_dict()
-                    with open(hrp_path, "w") as f:
-                        json.dump(pesos_dict, f, indent=4)
-                    logging.info(f"✅ [AWS MLOps] Auto-Rebalanceo HRP Ejecutado con Éxito. Pesos actualizados en {hrp_path}")
-        except Exception as e:
-            logging.error(f"Error durante Auto-Rebalanceo HRP: {e}")
+    def recalibrate_live_mc_mdd(self, new_trade_return: float):
+        """
+        Módulo MLOps Institucional: Recalibración Continua Bayesiana de MC MDD en AWS.
+        Cada 30 trades reales ejecutados en vivo, recalcula el MC MDD al 95%
+        combinando la historia OOS previa con los nuevos trades en vivo,
+        actualizando optimal_risk_pct dinámicamente en campeon_{symbol}.json.
+        """
+        trade_log_file = os.path.join(self.results_dir, f"live_returns_{self.symbol}.json")
+        live_rets = []
+        if os.path.exists(trade_log_file):
+            try:
+                with open(trade_log_file, 'r') as f:
+                    live_rets = json.load(f)
+            except Exception:
+                live_rets = []
+                
+        live_rets.append(float(new_trade_return))
+        with open(trade_log_file, 'w') as f:
+            json.dump(live_rets, f)
+            
+        if len(live_rets) >= 30 and len(live_rets) % 30 == 0:
+            logging.info(f"[{self.symbol}] 🔄 Recalibrando Monte Carlo MDD Continuo en Vivo ({len(live_rets)} trades en AWS)...")
+            try:
+                oos_rets = self.config.get("oos_returns", [])
+                all_rets = np.array(oos_rets + live_rets)
+                
+                if len(all_rets) > 20:
+                    sims_mat = np.random.choice(all_rets, size=(1000, len(all_rets)), replace=True)
+                    cum_mat = np.cumprod(1.0 + sims_mat, axis=1)
+                    peak_mat = np.maximum.accumulate(cum_mat, axis=1)
+                    dd_mat = (cum_mat - peak_mat) / peak_mat
+                    mdd_sims = dd_mat.min(axis=1)
+                    mc_mdd_95 = float(np.percentile(mdd_sims, 5))
+                    abs_mc = max(0.05, abs(mc_mdd_95))
+                    
+                    new_optimal_risk = float(np.clip((0.15 / abs_mc) * 0.045, 0.01, 0.0675))
+                    self.config["optimal_risk_pct"] = new_optimal_risk
+                    
+                    json_path = os.path.join(self.results_dir, f"campeon_{self.symbol}.json")
+                    if os.path.exists(json_path):
+                        with open(json_path, 'r', encoding='utf-8') as f:
+                            campeon_data = json.load(f)
+                        campeon_data["optimal_risk_pct"] = new_optimal_risk
+                        campeon_data["mc_mdd_live_recalibrated"] = mc_mdd_95
+                        with open(json_path, 'w', encoding='utf-8') as f:
+                            json.dump(campeon_data, f, indent=4)
+                            
+                    self.risk_manager.risk_per_trade_pct = new_optimal_risk * self.hrp_weight
+                    logging.info(f"[{self.symbol}] ✅ Recalibración MC MDD Completada: Nuevo MC MDD 95% = {mc_mdd_95:.2%} -> Nuevo Riesgo Base = {new_optimal_risk:.2%}")
+            except Exception as e:
+                logging.error(f"[{self.symbol}] Error en recalibración MC MDD: {e}")
 
 class MultiAssetBotManager:
     """Gestor maestro que controla múltiples bots (uno por cada activo) usando una sola conexión a MT5."""
