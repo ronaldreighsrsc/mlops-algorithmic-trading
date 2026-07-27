@@ -732,7 +732,7 @@ class TradingBot:
                     mc_mdd_95 = float(np.percentile(mdd_sims, 5))
                     abs_mc = max(0.05, abs(mc_mdd_95))
                     
-                    new_optimal_risk = float(np.clip((0.15 / abs_mc) * 0.045, 0.01, 0.0675))
+                    new_optimal_risk = float(np.clip((0.20 / abs_mc) * 0.045, 0.01, 0.0675))
                     self.config["optimal_risk_pct"] = new_optimal_risk
                     
                     json_path = os.path.join(self.results_dir, f"campeon_{self.symbol}.json")

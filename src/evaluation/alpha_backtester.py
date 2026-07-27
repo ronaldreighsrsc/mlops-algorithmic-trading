@@ -331,8 +331,8 @@ class TripleBarrierBacktester:
                     
                 drawdown = (current_equity / peak_equity) - 1.0
                 
-                # Kill-Switch Unlevaraged (10 rachas perdedoras * 1.5% volatilidad pura = 15%)
-                mdd_threshold = -0.15
+                # Kill-Switch Unlevaraged (20% Max Drawdown Kill-Switch)
+                mdd_threshold = -0.20
                 
                 if drawdown <= mdd_threshold:
                     is_dead = True
@@ -861,10 +861,10 @@ class TripleBarrierBacktester:
         tf_str = "H4" if "H4" in self.activo else ("H1" if "H1" in self.activo else "D1")
         
         # Automatización de Presupuesto de Riesgo Dinámico y Kill-Switch Montecarlo
-        mc_mdd_val = float(data['metrics'].get('MC_MDD_95', -0.15))
+        mc_mdd_val = float(data['metrics'].get('MC_MDD_95', -0.20))
         abs_mc_mdd = max(0.05, abs(mc_mdd_val))
-        optimal_risk = float(np.clip((0.15 / abs_mc_mdd) * 0.025, 0.01, 0.035))
-        kill_switch_mdd = float(min(-0.15, 1.2 * mc_mdd_val))
+        optimal_risk = float(np.clip((0.20 / abs_mc_mdd) * 0.045, 0.01, 0.0675))
+        kill_switch_mdd = float(min(-0.20, 1.2 * mc_mdd_val))
         
         config = {
             "activo": self.activo,

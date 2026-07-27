@@ -88,11 +88,11 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
     # Walk-Forward Rolling MC MDD (Eliminación de Lookahead Bias)
     # En vez de usar el MC MDD del OOS completo (que incluye trades futuros),
     # empezamos con un valor conservador y recalibramos cada 30 trades.
-    MC_MDD_CONSERVADOR = -0.15  # Igual al Kill-Switch del alpha_backtester
+    MC_MDD_CONSERVADOR = -0.20  # Límite Máximo Kill-Switch (-20% MDD)
     RECALIB_EVERY = 30          # Mínimo estadístico para Monte Carlo significativo
     N_SIMS_WALKFORWARD = 1000   # Permutaciones por recalibración
     max_riesgo_cap = riesgo_por_trade * 1.5
-    riesgo_base_activo = float(np.clip((0.15 / abs(MC_MDD_CONSERVADOR)) * riesgo_por_trade, 0.01, max_riesgo_cap))
+    riesgo_base_activo = float(np.clip((0.20 / abs(MC_MDD_CONSERVADOR)) * riesgo_por_trade, 0.01, max_riesgo_cap))
     
     # Guardar el MC MDD final del OOS para exportación a producción (sin lookahead en deploy)
     mc_mdd_final_oos = float(data['metrics'].get('MC_MDD_95', MC_MDD_CONSERVADOR))
@@ -140,7 +140,7 @@ def simulate_portfolio(activo="EURUSD", capital_inicial=10000.0, riesgo_por_trad
             mdd_sims = dd_mat.min(axis=1)
             mc_mdd_rolling = np.percentile(mdd_sims, 5)
             abs_mc = max(0.05, abs(mc_mdd_rolling))
-            riesgo_base_activo = float(np.clip((0.15 / abs_mc) * riesgo_por_trade, 0.01, max_riesgo_cap))
+            riesgo_base_activo = float(np.clip((0.20 / abs_mc) * riesgo_por_trade, 0.01, max_riesgo_cap))
             print(f"  🔄 Walk-Forward MC MDD Recalibrado (Trade #{len(accumulated_returns)}): "
                   f"MC_MDD_95 = {mc_mdd_rolling:.2%} → Riesgo = {riesgo_base_activo*100:.2f}%")
         
