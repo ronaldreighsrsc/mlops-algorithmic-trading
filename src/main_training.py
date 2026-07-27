@@ -27,7 +27,6 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # ==============================================================================
 # CONFIGURACIÓN DEL EXPERIMENTO
 # ==============================================================================
-# ⚠️ MODO RECUPERACIÓN (Crash RAM): Corriendo de a 1 activo.
 ACTIVOS_A_CORRER = ["EURUSD_H4", "SP500_H4", "Oro_H4"] #["ECH", "EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4"]
 MODELOS_A_CORRER = [
     'RANDOM_FOREST',

@@ -367,10 +367,12 @@ if __name__ == "__main__":
         capital_hrp = capital_inicial
         capital_eq = capital_inicial
         capital_sma = capital_inicial
+        capital_torneo = capital_inicial
         
         historial_hrp = [capital_inicial]
         historial_eq = [capital_inicial]
         historial_sma = [capital_inicial]
+        historial_torneo = [capital_inicial]
         fechas_sim = [df_returns.index[0]]
         
         if len(df_returns) < 100:
@@ -380,6 +382,7 @@ if __name__ == "__main__":
         activos_reales = list(series_retornos.keys())
         n_activos_reales = len(activos_reales)
         pesos_hrp = pd.Series(1.0 / n_activos_reales, index=activos_reales)
+        pesos_torneo = pd.Series(1.0 / n_activos_reales, index=activos_reales)
         
         # Pre-calcular SMA-200 para cada activo (Long-Cash filter)
         sma_signals = {}
