@@ -362,104 +362,21 @@ class TradingBot:
         if prob < 0:
             return # Error en la prediccion
             
-        logging.info(f"Probabilidad de tocar Take Profit (Triple Barrera): {prob:.2%} (Umbral: >{self.config['confidence_threshold']:.0%})")
-        
         # Determinar dirección de la señal
         is_long = prob > self.config["confidence_threshold"]
         is_short = self.config.get("bilateral", False) and prob < (1.0 - self.config["confidence_threshold"])
         
-        if is_long or is_short:
-            direction = "COMPRA (Long)" if is_long else "VENTA (Short)"
-            logging.info(f">>> SEÑAL DE {direction} DISPARADA <<<")
-            
-            # Calculos de Riesgo
-            last_vol = df_proc['EGARCH_Vol'].iloc[-1]
-            
-            if self.symbol == "ECH":
-                # ECH usa Yahoo Finance, no tenemos MT5 tick info
-                current_price = df_proc['close'].iloc[-1]
-                lots = 0.0 # No podemos ejecutar lotes en MT5
-                account_balance = 500.0 # Balance asumido para la alerta de telegram
-                
-                if is_long:
-                    tp_price, sl_price = self.risk_manager.calculate_triple_barrier_levels(current_price, last_vol)
-                else:
-                    vol_decimal = last_vol / 100.0
-                    tp_price = current_price * (1 - self.risk_manager.k_up * vol_decimal)
-                    sl_price = current_price * (1 + self.risk_manager.k_down * vol_decimal)
-            else:
-                sym_info = self.engine.get_symbol_info(self.symbol)
-                if sym_info is None:
-                    return
-                    
-                account_info = mt5.account_info()
-                account_balance = account_info.balance
-                
-                if is_long:
-                    current_price = mt5.symbol_info_tick(self.symbol).ask
-                    tp_price, sl_price = self.risk_manager.calculate_triple_barrier_levels(current_price, last_vol)
-                else:
-                    # SHORT: TP abajo, SL arriba (invertido)
-                    current_price = mt5.symbol_info_tick(self.symbol).bid
-                    vol_decimal = last_vol / 100.0
-                    tp_price = current_price * (1 - self.risk_manager.k_up * vol_decimal)
-                    sl_price = current_price * (1 + self.risk_manager.k_down * vol_decimal)
-                
-                lots = self.risk_manager.calculate_position_size(
-                    balance=account_balance,
-                    current_price=current_price,
-                    stop_loss_price=sl_price,
-                    tick_size=sym_info['tick_size'],
-                    tick_value=sym_info['tick_value'],
-                    volume_step=sym_info['volume_step'],
-                    prediction_prob=prob,
-                    confidence_threshold=self.config["confidence_threshold"]
-                )
-            
-            # Validacion de volumenes minimos del broker (Solo si no es ECH)
-            if self.symbol != "ECH" and lots < sym_info['volume_min']:
-                logging.warning(f"Volumen calculado ({lots}) es menor al minimo permitido ({sym_info['volume_min']}). Abortando trade.")
-                return
-            
-            # Calcular riesgo dinámico para la alerta de Telegram
-            kelly_mult = 1.0
-            if prob > 0.5:
-                delta = prob - self.config["confidence_threshold"]
-            else:
-                delta = (1.0 - self.config["confidence_threshold"]) - prob
-            delta = max(0, delta)
-            if delta <= 0.05: kelly_mult = 0.5
-            elif delta <= 0.15: kelly_mult = 1.0
-            else: kelly_mult = 2.0
-            
-            dynamic_risk_pct = self.risk_manager.risk_per_trade_pct * kelly_mult
-            
-            # Enviar notificación Telegram (Trade) con timeframe explícito
-            tf_str_map = {mt5.TIMEFRAME_D1: "D1", mt5.TIMEFRAME_H4: "H4", mt5.TIMEFRAME_H1: "H1"}
-            tf_label = tf_str_map.get(self.timeframe, self.config.get("timeframe", "D1"))
-
-            self.notifier.alert_trade_execution(
-                symbol=self.symbol, volume=lots, price=current_price, tp=tp_price, sl=sl_price, is_long=is_long, account_balance=account_balance, risk_pct=dynamic_risk_pct, timeframe=tf_label
-            )
-
-            
-            # Registrar en el Diario de Trading en Vivo (CSV)
-            self._log_to_live_journal(
-                prob=prob, signal=direction, status="EJECUTADO", 
-                price=current_price, tp=tp_price, sl=sl_price, 
-                lots=lots, risk_pct=dynamic_risk_pct, balance=account_balance
-            )
-
-            # 6. Enviar orden a MT5
-            if self.symbol != "ECH":
-                if is_long:
-                    self.engine.send_market_buy_order(self.symbol, lots, sl_price, tp_price)
-                else:
-                    self.engine.send_market_sell_order(self.symbol, lots, sl_price, tp_price)
-            else:
-                logging.info(f"Símbolo ECH detectado. Alerta enviada a Telegram. Ejecución MT5 saltada ya que se opera en Quantfury.")
+        if is_long:
+            direction = "COMPRA (Long)"
+            logging.info(f"Convicción Alcista (LONG): {prob:.2%} (Umbral: >{self.config['confidence_threshold']:.0%})")
+            logging.info(">>> SEÑAL DE COMPRA (Long) DISPARADA <<<")
+        elif is_short:
+            direction = "VENTA (Short)"
+            short_prob = 1.0 - prob
+            logging.info(f"Convicción Bajista (SHORT): {short_prob:.2%} (Prob Alcista: {prob:.2%} | Umbral: >{self.config['confidence_threshold']:.0%})")
+            logging.info(">>> SEÑAL DE VENTA (Short) DISPARADA <<<")
         else:
-            # Enviar notificación de status sin señal
+            logging.info(f"Probabilidad Alcista: {prob:.2%} (Sin señal clara — fuera de umbrales)")
             last_vol = df_proc['EGARCH_Vol'].iloc[-1]
             self.notifier.alert_daily_check(self.symbol, last_vol, has_signal=False)
             self._log_to_live_journal(
@@ -467,6 +384,93 @@ class TradingBot:
                 price=df_proc['close'].iloc[-1], tp=0.0, sl=0.0, 
                 lots=0.0, risk_pct=0.0, balance=0.0
             )
+            return
+            
+        # Calculos de Riesgo
+        last_vol = df_proc['EGARCH_Vol'].iloc[-1]
+        
+        if self.symbol == "ECH":
+            # ECH usa Yahoo Finance, no tenemos MT5 tick info
+            current_price = df_proc['close'].iloc[-1]
+            lots = 0.0 # No podemos ejecutar lotes en MT5
+            account_balance = 500.0 # Balance asumido para la alerta de telegram
+            
+            if is_long:
+                tp_price, sl_price = self.risk_manager.calculate_triple_barrier_levels(current_price, last_vol)
+            else:
+                vol_decimal = last_vol / 100.0
+                tp_price = current_price * (1 - self.risk_manager.k_up * vol_decimal)
+                sl_price = current_price * (1 + self.risk_manager.k_down * vol_decimal)
+        else:
+            sym_info = self.engine.get_symbol_info(self.symbol)
+            if sym_info is None:
+                return
+                
+            account_info = mt5.account_info()
+            account_balance = account_info.balance
+            
+            if is_long:
+                current_price = mt5.symbol_info_tick(self.symbol).ask
+                tp_price, sl_price = self.risk_manager.calculate_triple_barrier_levels(current_price, last_vol)
+            else:
+                # SHORT: TP abajo, SL arriba (invertido)
+                current_price = mt5.symbol_info_tick(self.symbol).bid
+                vol_decimal = last_vol / 100.0
+                tp_price = current_price * (1 - self.risk_manager.k_up * vol_decimal)
+                sl_price = current_price * (1 + self.risk_manager.k_down * vol_decimal)
+            
+            lots = self.risk_manager.calculate_position_size(
+                balance=account_balance,
+                current_price=current_price,
+                stop_loss_price=sl_price,
+                tick_size=sym_info['tick_size'],
+                tick_value=sym_info['tick_value'],
+                volume_step=sym_info['volume_step'],
+                prediction_prob=prob,
+                confidence_threshold=self.config["confidence_threshold"]
+            )
+        
+        # Validacion de volumenes minimos del broker (Solo si no es ECH)
+        if self.symbol != "ECH" and lots < sym_info['volume_min']:
+            logging.warning(f"Volumen calculado ({lots}) es menor al minimo permitido ({sym_info['volume_min']}). Abortando trade.")
+            return
+        
+        # Calcular riesgo dinámico para la alerta de Telegram
+        kelly_mult = 1.0
+        if prob > 0.5:
+            delta = prob - self.config["confidence_threshold"]
+        else:
+            delta = (1.0 - self.config["confidence_threshold"]) - prob
+        delta = max(0, delta)
+        if delta <= 0.05: kelly_mult = 0.5
+        elif delta <= 0.15: kelly_mult = 1.0
+        else: kelly_mult = 2.0
+        
+        dynamic_risk_pct = self.risk_manager.risk_per_trade_pct * kelly_mult
+        
+        # Enviar notificación Telegram (Trade) con timeframe explícito
+        tf_str_map = {mt5.TIMEFRAME_D1: "D1", mt5.TIMEFRAME_H4: "H4", mt5.TIMEFRAME_H1: "H1"}
+        tf_label = tf_str_map.get(self.timeframe, self.config.get("timeframe", "D1"))
+
+        self.notifier.alert_trade_execution(
+            symbol=self.symbol, volume=lots, price=current_price, tp=tp_price, sl=sl_price, is_long=is_long, account_balance=account_balance, risk_pct=dynamic_risk_pct, timeframe=tf_label
+        )
+
+        # Registrar en el Diario de Trading en Vivo (CSV)
+        self._log_to_live_journal(
+            prob=prob, signal=direction, status="EJECUTADO", 
+            price=current_price, tp=tp_price, sl=sl_price, 
+            lots=lots, risk_pct=dynamic_risk_pct, balance=account_balance
+        )
+
+        # 6. Enviar orden a MT5
+        if self.symbol != "ECH":
+            if is_long:
+                self.engine.send_market_buy_order(self.symbol, lots, sl_price, tp_price)
+            else:
+                self.engine.send_market_sell_order(self.symbol, lots, sl_price, tp_price)
+        else:
+            logging.info(f"Símbolo ECH detectado. Alerta enviada a Telegram. Ejecución MT5 saltada ya que se opera en Quantfury.")
 
     def _log_to_live_journal(self, prob: float, signal: str, status: str, 
                              price: float, tp: float, sl: float, 
