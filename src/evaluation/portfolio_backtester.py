@@ -421,7 +421,7 @@ if __name__ == "__main__":
                         
                         # Performance-Weighted HRP Shrinkage (Sharpe-Weighted Adaptive Target)
                         # En lugar de 1/N plano, encauza el capital hacia activos de mayor Sharpe reciente (últimos 100 días)
-                        SHRINKAGE_LAMBDA = 0.70
+                        SHRINKAGE_LAMBDA = 0.85
                         rets_v = ventana_historica[cols_validas]
                         std_v = rets_v.std()
                         mean_v = rets_v.mean()
@@ -434,8 +434,8 @@ if __name__ == "__main__":
                         
                         # 2. Dynamic Bounds adaptables a N activos activos
                         N_act = len(cols_validas)
-                        MIN_PESO = 0.25 / N_act                         # p.ej. N=5 -> 5%, N=2 -> 12.5%
-                        MAX_PESO = min(0.60, 2.0 / N_act)              # p.ej. N=5 -> 40%, N=2 -> 60%
+                        MIN_PESO = 0.15 / N_act
+                        MAX_PESO = min(0.55, 2.5 / N_act)
                         
                         for col in pesos_hrp.index:
                             pesos_hrp[col] = max(MIN_PESO, min(MAX_PESO, pesos_hrp[col]))
