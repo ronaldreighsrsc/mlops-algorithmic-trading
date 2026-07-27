@@ -7,6 +7,7 @@ if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
 import time
+import json
 import logging
 import warnings
 from datetime import datetime, timezone
@@ -19,6 +20,7 @@ from execution.risk_manager import RiskManager
 from execution.execution_engine import ExecutionEngine
 from execution.telegram_notifier import TelegramNotifier
 from mt5_connector import MT5Connector
+from evaluation.hrp_optimizer import HRPOptimizer
 
 from preprocessing.technical_features import TechnicalFeatureEngineer
 from preprocessing.volatility import VolatilityModeler
@@ -713,6 +715,9 @@ class TradingBot:
                     with open(hrp_path, "w") as f:
                         json.dump(pesos_dict, f, indent=4)
                     logging.info(f"✅ [AWS MLOps] Auto-Rebalanceo Mensual Ejecutado con Éxito. Pesos actualizados en {hrp_path}")
+        except Exception as e:
+            logging.error(f"Error en Auto-Rebalanceo Mensual: {e}")
+
     def recalibrate_live_mc_mdd(self, new_trade_return: float):
         """
         Módulo MLOps Institucional: Recalibración Continua Bayesiana de MC MDD en AWS.

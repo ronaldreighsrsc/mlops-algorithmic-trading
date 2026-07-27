@@ -387,24 +387,19 @@ if __name__ == "__main__":
             try:
                 sma_period = 1200 if '_H4' in act else (4800 if '_H1' in act else 200)
                 raw_path = os.path.join(data_dir, "raw", f"{act}_daily.csv")
-                if not os.path.exists(raw_path) and '_' in act:
-                    base_act = act.split('_')[0]
-                    raw_path = os.path.join(data_dir, "raw", f"{base_act}_daily.csv")
-                    
-                if os.path.exists(raw_path):
-                    df_raw_act = pd.read_csv(raw_path)
-                    raw_closes = df_raw_act['close'].values
-                    sma_vals = pd.Series(raw_closes).rolling(window=sma_period).mean().values
-                    signal = raw_closes > sma_vals
-                    n_needed = len(df_returns)
+                s_prices = series_retornos[act]
+                if len(s_prices) > 200:
+                    sma200 = s_prices.rolling(window=200).mean()
+                    signal = s_prices.iloc[100:] > sma200.iloc[100:]
+                    n_needed = len(df_returns) - 100
                     if len(signal) >= n_needed:
                         sma_signals[act] = signal[-n_needed:]
                     else:
                         sma_signals[act] = np.ones(n_needed, dtype=bool)
                 else:
-                    sma_signals[act] = np.ones(len(df_returns), dtype=bool)
+                    sma_signals[act] = np.ones(len(df_returns)-100, dtype=bool)
             except Exception:
-                sma_signals[act] = np.ones(len(df_returns), dtype=bool)
+                sma_signals[act] = np.ones(len(df_returns)-100, dtype=bool)
         
         # Caminar a través del tiempo
         for i in range(100, len(df_returns)):
@@ -419,35 +414,50 @@ if __name__ == "__main__":
                         for col in cols_validas:
                             pesos_hrp[col] = pesos_hrp_validos[col]
                         
-                        # Performance-Weighted HRP Shrinkage (Sharpe-Weighted Adaptive Target)
-                        # En lugar de 1/N plano, encauza el capital hacia activos de mayor Sharpe reciente (últimos 100 días)
+                        # Performance-Weighted HRP Shrinkage
                         SHRINKAGE_LAMBDA = 0.85
                         rets_v = ventana_historica[cols_validas]
                         std_v = rets_v.std()
                         mean_v = rets_v.mean()
                         sharpe_v = np.where(std_v > 0, (mean_v / std_v) * np.sqrt(252), 0.1)
-                        sharpe_v = np.maximum(0.05, sharpe_v)  # Piso de Sharpe positivo
+                        sharpe_v = np.maximum(0.05, sharpe_v)
                         pesos_perf = pd.Series(sharpe_v / sharpe_v.sum(), index=cols_validas)
                         
                         for col in cols_validas:
                             pesos_hrp[col] = (1 - SHRINKAGE_LAMBDA) * pesos_hrp_validos[col] + SHRINKAGE_LAMBDA * pesos_perf[col]
                         
-                        # 2. Dynamic Bounds adaptables a N activos activos
+                        # Dynamic Bounds adaptables
                         N_act = len(cols_validas)
                         MIN_PESO = 0.15 / N_act
                         MAX_PESO = min(0.55, 2.5 / N_act)
                         
                         for col in pesos_hrp.index:
                             pesos_hrp[col] = max(MIN_PESO, min(MAX_PESO, pesos_hrp[col]))
-                        pesos_hrp /= pesos_hrp.sum()  # Renormalizar a 1.0
+                        pesos_hrp /= pesos_hrp.sum()
+                        
+                        # 🏆 Torneo Dinámico Mensual: Comparar Sharpe HRP vs Sharpe 1/N en los últimos 100 días
+                        ret_hrp_v = (rets_v @ pesos_hrp[cols_validas])
+                        ret_eq_v = rets_v.mean(axis=1)
+                        
+                        sh_hrp_v = (ret_hrp_v.mean() / ret_hrp_v.std()) if ret_hrp_v.std() > 0 else 0.0
+                        sh_eq_v = (ret_eq_v.mean() / ret_eq_v.std()) if ret_eq_v.std() > 0 else 0.0
+                        
+                        if sh_hrp_v >= sh_eq_v:
+                            pesos_torneo = pesos_hrp.copy()
+                        else:
+                            pesos_torneo = pd.Series(1.0 / n_activos_reales, index=activos_reales)
                     except Exception as e:
-                        pass # Usar pesos anteriores si falla la matriz
+                        pass
                         
             retornos_dia = df_returns.iloc[i]
             
             # PnL HRP
             pnl_pct_hrp = (pesos_hrp * retornos_dia).sum()
             capital_hrp *= (1 + pnl_pct_hrp)
+            
+            # PnL Torneo Dinámico Mensual (Producción Real)
+            pnl_pct_torneo = (pesos_torneo * retornos_dia).sum()
+            capital_torneo *= (1 + pnl_pct_torneo)
             
             # PnL Equivalente (1/N)
             pnl_pct_eq = (retornos_dia.sum() / n_activos_reales)
@@ -457,13 +467,14 @@ if __name__ == "__main__":
             activos_con_signal = list(series_retornos.keys())
             sma_retorno = 0.0
             for act in activos_con_signal:
-                if act in sma_signals and i < len(sma_signals[act]) and sma_signals[act][i]:
+                if act in sma_signals and (i-100) < len(sma_signals[act]) and sma_signals[act][i-100]:
                     sma_retorno += retornos_dia.get(act, 0.0)
             
             pnl_pct_sma = sma_retorno / n_activos_reales
             capital_sma *= (1 + pnl_pct_sma)
             
             historial_hrp.append(capital_hrp)
+            historial_torneo.append(capital_torneo)
             historial_eq.append(capital_eq)
             historial_sma.append(capital_sma)
             fechas_sim.append(df_returns.index[i])
@@ -485,6 +496,7 @@ if __name__ == "__main__":
             return roi, cagr, sharpe, starr, mdd
 
         roi_hrp, cagr_hrp, sharpe_hrp, starr_hrp, mdd_hrp = _calc_metrics(historial_hrp)
+        roi_torneo, cagr_torneo, sharpe_torneo, starr_torneo, mdd_torneo = _calc_metrics(historial_torneo)
         roi_eq, cagr_eq, sharpe_eq, starr_eq, mdd_eq = _calc_metrics(historial_eq)
         roi_sma, cagr_sma, sharpe_sma, starr_sma, mdd_sma = _calc_metrics(historial_sma)
 
@@ -545,28 +557,33 @@ if __name__ == "__main__":
 
         print(f"\n📊 RESULTADOS COMPARATIVOS GLOBAL PORTFOLIO (Rebalanceo Mensual)")
         print(f"{'='*95}")
-        print(f"{'ESTRATEGIA / BENCHMARK':<32} | {'ROI TOTAL':<10} | {'CAGR':<8} | {'SHARPE':<8} | {'STARR':<8} | {'MAX DRAWDOWN':<12}")
+        print(f"{'ESTRATEGIA / BENCHMARK':<35} | {'ROI TOTAL':<10} | {'CAGR':<8} | {'SHARPE':<8} | {'STARR':<8} | {'MAX DRAWDOWN':<12}")
         print(f"{'-'*95}")
-        print(f"{'Portafolio HRP (Tu Bot ML)':<32} | {roi_hrp:>10.2%} | {cagr_hrp:>8.2%} | {sharpe_hrp:>8.2f} | {starr_hrp:>8.2f} | {mdd_hrp:>12.2%}")
-        print(f"{'Indexado 100% SP500 (Buy & Hold)':<32} | {roi_sp_bh:>10.2%} | {cagr_sp_bh:>8.2%} | {sharpe_sp_bh:>8.2f} | {starr_sp_bh:>8.2f} | {mdd_sp_bh:>12.2%}")
-        print(f"{'SP500 + SMA-200 (Trend Following)':<32} | {roi_sp_sma:>10.2%} | {cagr_sp_sma:>8.2%} | {sharpe_sp_sma:>8.2f} | {starr_sp_sma:>8.2f} | {mdd_sp_sma:>12.2%}")
-        print(f"{'Portafolio 1/N (Mercado Cesta)':<32} | {roi_eq:>10.2%} | {cagr_eq:>8.2%} | {sharpe_eq:>8.2f} | {starr_eq:>8.2f} | {mdd_eq:>12.2%}")
-        print(f"{'Portafolio 1/N + SMA-200':<32} | {roi_sma:>10.2%} | {cagr_sma:>8.2%} | {sharpe_sma:>8.2f} | {starr_sma:>8.2f} | {mdd_sma:>12.2%}")
+        print(f"{'⭐ Torneo Dinámico (Producción AWS)':<35} | {roi_torneo:>10.2%} | {cagr_torneo:>8.2%} | {sharpe_torneo:>8.2f} | {starr_torneo:>8.2f} | {mdd_torneo:>12.2%}")
+        print(f"{'Portafolio HRP (Tu Bot ML)':<35} | {roi_hrp:>10.2%} | {cagr_hrp:>8.2%} | {sharpe_hrp:>8.2f} | {starr_hrp:>8.2f} | {mdd_hrp:>12.2%}")
+        print(f"{'Portafolio 1/N (Mercado Cesta)':<35} | {roi_eq:>10.2%} | {cagr_eq:>8.2%} | {sharpe_eq:>8.2f} | {starr_eq:>8.2f} | {mdd_eq:>12.2%}")
+        print(f"{'Indexado 100% SP500 (Buy & Hold)':<35} | {roi_sp_bh:>10.2%} | {cagr_sp_bh:>8.2%} | {sharpe_sp_bh:>8.2f} | {starr_sp_bh:>8.2f} | {mdd_sp_bh:>12.2%}")
+        print(f"{'SP500 + SMA-200 (Trend Following)':<35} | {roi_sp_sma:>10.2%} | {cagr_sp_sma:>8.2%} | {sharpe_sp_sma:>8.2f} | {starr_sp_sma:>8.2f} | {mdd_sp_sma:>12.2%}")
+        print(f"{'Portafolio 1/N + SMA-200':<35} | {roi_sma:>10.2%} | {cagr_sma:>8.2%} | {sharpe_sma:>8.2f} | {starr_sma:>8.2f} | {mdd_sma:>12.2%}")
         print(f"{'='*95}\n")
         
         plt.figure(figsize=(12, 6))
-        plt.plot(fechas_sim, historial_hrp, label=f'Portafolio HRP (Tu Bot ML) - ROI: {roi_hrp:.2%} | Sharpe: {sharpe_hrp:.2f}', color='blue', linewidth=2.5)
+        
+        # Curva de Producción Real: Torneo Dinámico Mensual HRP vs 1/N
+        plt.plot(fechas_sim, historial_torneo, label=f'⭐ PRODUCCIÓN REAL (Torneo Dinámico AWS) - ROI: {roi_torneo:.2%} | Sharpe: {sharpe_torneo:.2f} | MDD: {mdd_torneo:.2%}', color='#f59e0b', linewidth=3.5, zorder=6)
+        plt.plot(fechas_sim, historial_hrp, label=f'Portafolio HRP Puro - ROI: {roi_hrp:.2%} | Sharpe: {sharpe_hrp:.2f}', color='blue', linestyle='--', linewidth=1.5, alpha=0.7)
+        plt.plot(fechas_sim, historial_eq, label=f'Portafolio 1/N Puro - ROI: {roi_eq:.2%} | Sharpe: {sharpe_eq:.2f}', color='gray', linestyle='--', linewidth=1.5, alpha=0.7)
         plt.plot(fechas_sim, sp500_bh_cap, label=f'Indexado 100% SP500 (Buy & Hold) - ROI: {roi_sp_bh:.2%} | Sharpe: {sharpe_sp_bh:.2f}', color='red', linestyle=':', linewidth=2)
         plt.plot(fechas_sim, sp500_sma_cap, label=f'SP500 + SMA-200 (Trend Following) - ROI: {roi_sp_sma:.2%} | Sharpe: {sharpe_sp_sma:.2f}', color='orange', linestyle='-.', linewidth=2)
-        plt.plot(fechas_sim, historial_eq, label=f'Portafolio 1/N (Tradicional) - ROI: {roi_eq:.2%} | Sharpe: {sharpe_eq:.2f}', color='gray', linestyle='--', linewidth=1.5)
         plt.plot(fechas_sim, historial_sma, label=f'Portafolio 1/N + SMA-200 - ROI: {roi_sma:.2%} | Sharpe: {sharpe_sma:.2f}', color='#10b981', linestyle='--', linewidth=1.5)
-        plt.title("HRP vs SP500 vs 1/N Benchmarks Portfolio Backtest", fontsize=15, fontweight='bold')
+        
+        plt.title("HRP vs SP500 vs 1/N - Curva Híbrida Real de Producción AWS (Torneo Dinámico)", fontsize=13, fontweight='bold')
         plt.ylabel("Capital en Dólares ($USD)")
         plt.grid(True, linestyle=':', alpha=0.6)
-        plt.legend(fontsize=9)
+        plt.legend(fontsize=9, loc='upper left')
         plt.tight_layout()
         plt.savefig("global_portfolio_hrp.png")
-        print("✅ Gráfico guardado como 'global_portfolio_hrp.png'")
+        print("✅ Gráfico guardado con la Curva Híbrida Real de Producción AWS como 'global_portfolio_hrp.png'")
         
         # Torneo Automático de Asignación de Portafolio: HRP vs 1/N
         # Si HRP no supera al 1/N en ROI o Sharpe, se activa por defecto el 1/N (Naive Diversification)
