@@ -677,8 +677,8 @@ class TradingBot:
                     hrp = HRPOptimizer()
                     w_hrp_raw = hrp.allocate(ventana[cols])
                     
-                    # Sharpe-Weighted Adaptive Shrinkage (lambda = 0.70)
-                    SHRINKAGE_LAMBDA = 0.70
+                    # Sharpe-Weighted Adaptive Shrinkage (lambda = 0.85)
+                    SHRINKAGE_LAMBDA = 0.85
                     std_v = ventana[cols].std()
                     mean_v = ventana[cols].mean()
                     sharpe_v = np.where(std_v > 0, (mean_v / std_v) * np.sqrt(252), 0.1)
@@ -687,8 +687,8 @@ class TradingBot:
                     
                     w_final = pd.Series(0.0, index=activos)
                     N_act = len(cols)
-                    w_min = 0.25 / N_act
-                    w_max = min(0.60, 2.0 / N_act)
+                    w_min = 0.15 / N_act
+                    w_max = min(0.55, 2.5 / N_act)
                     
                     for col in cols:
                         raw_w = (1 - SHRINKAGE_LAMBDA) * w_hrp_raw[col] + SHRINKAGE_LAMBDA * w_perf[col]
@@ -696,7 +696,23 @@ class TradingBot:
                         
                     w_final = w_final / w_final.sum()
                     
+                    # Torneo de Rendimiento Reciente (HRP vs 1/N)
+                    ret_hrp = (ventana[cols] * w_final[cols]).sum(axis=1)
+                    ret_eq = (ventana[cols].mean(axis=1))
+                    
+                    sr_hrp = (ret_hrp.mean() / ret_hrp.std()) * np.sqrt(252) if ret_hrp.std() > 0 else 0
+                    sr_eq = (ret_eq.mean() / ret_eq.std()) * np.sqrt(252) if ret_eq.std() > 0 else 0
+                    
+                    if sr_eq > sr_hrp:
+                        logging.info(f"⚖️ [AWS MLOps] Torneo Mensual: 1/N ({sr_eq:.2f}) superó a HRP ({sr_hrp:.2f}). Usando asignación 1/N.")
+                        w_final = pd.Series(1.0 / len(activos), index=activos)
+                    else:
+                        logging.info(f"⚖️ [AWS MLOps] Torneo Mensual: HRP ({sr_hrp:.2f}) superó a 1/N ({sr_eq:.2f}). Usando asignación HRP.")
+                    
                     pesos_dict = w_final.to_dict()
+                    with open(hrp_path, "w") as f:
+                        json.dump(pesos_dict, f, indent=4)
+                    logging.info(f"✅ [AWS MLOps] Auto-Rebalanceo Mensual Ejecutado con Éxito. Pesos actualizados en {hrp_path}")
     def recalibrate_live_mc_mdd(self, new_trade_return: float):
         """
         Módulo MLOps Institucional: Recalibración Continua Bayesiana de MC MDD en AWS.

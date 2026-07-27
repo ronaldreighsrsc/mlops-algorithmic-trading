@@ -329,7 +329,7 @@ if __name__ == "__main__":
     # CONFIGURACIÓN MAESTRA DE EVALUACIÓN Y PORTAFOLIO GLOBAL
     # ==============================================================================
     CAPITAL = 10000.0        # USD en tu broker
-    RIESGO_PCT = 0.025       # 2.5% riesgo base por trade (optimizado para presupuesto MDD < 15%)
+    RIESGO_PCT = 0.045       # 4.5% riesgo base por trade (optimizado para presupuesto MDD < 15%)
     FAST_MODE = True         # True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
     
     activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
@@ -421,7 +421,7 @@ if __name__ == "__main__":
                         
                         # Performance-Weighted HRP Shrinkage (Sharpe-Weighted Adaptive Target)
                         # En lugar de 1/N plano, encauza el capital hacia activos de mayor Sharpe reciente (últimos 100 días)
-                        SHRINKAGE_LAMBDA = 0.50
+                        SHRINKAGE_LAMBDA = 0.85
                         rets_v = ventana_historica[cols_validas]
                         std_v = rets_v.std()
                         mean_v = rets_v.mean()
@@ -432,10 +432,10 @@ if __name__ == "__main__":
                         for col in cols_validas:
                             pesos_hrp[col] = (1 - SHRINKAGE_LAMBDA) * pesos_hrp_validos[col] + SHRINKAGE_LAMBDA * pesos_perf[col]
                         
-                        # 2. Dynamic Bounds adaptables a N activos activos (Diversificación Fiel)
+                        # 2. Dynamic Bounds adaptables a N activos activos
                         N_act = len(cols_validas)
-                        MIN_PESO = 0.25 / N_act
-                        MAX_PESO = min(0.35, 1.75 / N_act)
+                        MIN_PESO = 0.15 / N_act
+                        MAX_PESO = min(0.55, 2.5 / N_act)
                         
                         for col in pesos_hrp.index:
                             pesos_hrp[col] = max(MIN_PESO, min(MAX_PESO, pesos_hrp[col]))
@@ -568,11 +568,25 @@ if __name__ == "__main__":
         plt.savefig("global_portfolio_hrp.png")
         print("✅ Gráfico guardado como 'global_portfolio_hrp.png'")
         
+        # Torneo Automático de Asignación de Portafolio: HRP vs 1/N
+        # Si HRP no supera al 1/N en ROI o Sharpe, se activa por defecto el 1/N (Naive Diversification)
+        use_hrp = (roi_hrp >= roi_eq) or (sharpe_hrp >= sharpe_eq)
+        
+        if use_hrp:
+            pesos_finales = pesos_hrp
+            modo_seleccion = "HRP Machine Learning"
+            print(f"🏆 Torneo de Asignación: Ganador HRP Machine Learning (ROI: {roi_hrp:.2%} | Sharpe: {sharpe_hrp:.2f})")
+        else:
+            pesos_finales = pd.Series(1.0 / n_activos_reales, index=activos_reales)
+            modo_seleccion = "1/N Naive Diversification (Fallback Automático por Superioridad)"
+            print(f"🏆 Torneo de Asignación: Ganador 1/N Naive Diversification (ROI: {roi_eq:.2%} | Sharpe: {sharpe_eq:.2f})")
+            print(f"  👉 HRP quedó rezagado ({roi_hrp:.2%}). Producción exportará weights 1/N ({1.0/n_activos_reales:.2%}/activo) para maximizar retorno en AWS.")
+
         # Guardar pesos finales para el Bot en Vivo
         import json
-        pesos_dict = pesos_hrp.to_dict()
+        pesos_dict = pesos_finales.to_dict()
         with open(os.path.join(results_dir, "hrp_weights.json"), "w") as f:
             json.dump(pesos_dict, f, indent=4)
-        print("✅ Pesos HRP exportados a 'hrp_weights.json' para Producción.")
+        print(f"✅ Pesos ({modo_seleccion}) exportados a 'hrp_weights.json' para Producción.")
 
     simulate_global_portfolio(series_retornos=series_retornos, capital_inicial=CAPITAL)
