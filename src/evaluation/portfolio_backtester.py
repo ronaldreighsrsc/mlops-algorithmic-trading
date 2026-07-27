@@ -329,7 +329,7 @@ if __name__ == "__main__":
     # CONFIGURACIÓN MAESTRA DE EVALUACIÓN Y PORTAFOLIO GLOBAL
     # ==============================================================================
     CAPITAL = 10000.0        # USD en tu broker
-    RIESGO_PCT = 0.045       # 4.5% riesgo base por trade (optimizado para presupuesto MDD < 15%)
+    RIESGO_PCT = 0.025       # 2.5% riesgo base por trade (optimizado para presupuesto MDD < 15%)
     FAST_MODE = True         # True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
     
     activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
@@ -421,7 +421,7 @@ if __name__ == "__main__":
                         
                         # Performance-Weighted HRP Shrinkage (Sharpe-Weighted Adaptive Target)
                         # En lugar de 1/N plano, encauza el capital hacia activos de mayor Sharpe reciente (últimos 100 días)
-                        SHRINKAGE_LAMBDA = 0.85
+                        SHRINKAGE_LAMBDA = 0.50
                         rets_v = ventana_historica[cols_validas]
                         std_v = rets_v.std()
                         mean_v = rets_v.mean()
@@ -432,10 +432,10 @@ if __name__ == "__main__":
                         for col in cols_validas:
                             pesos_hrp[col] = (1 - SHRINKAGE_LAMBDA) * pesos_hrp_validos[col] + SHRINKAGE_LAMBDA * pesos_perf[col]
                         
-                        # 2. Dynamic Bounds adaptables a N activos activos
+                        # 2. Dynamic Bounds adaptables a N activos activos (Diversificación Fiel)
                         N_act = len(cols_validas)
-                        MIN_PESO = 0.15 / N_act
-                        MAX_PESO = min(0.55, 2.5 / N_act)
+                        MIN_PESO = 0.25 / N_act
+                        MAX_PESO = min(0.35, 1.75 / N_act)
                         
                         for col in pesos_hrp.index:
                             pesos_hrp[col] = max(MIN_PESO, min(MAX_PESO, pesos_hrp[col]))
