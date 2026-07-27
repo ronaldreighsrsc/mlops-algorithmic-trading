@@ -183,18 +183,18 @@ Para eliminar este sesgo, `portfolio_backtester.py` implementa un **Walk-Forward
 > - **En producción (AWS)**, el bot arranca con el MC MDD del OOS completo (legítimo, ya que al desplegar ya se observó todo el OOS) → tiene **mejor información desde el día 1**.
 > - Si el backtest pesimista ya es rentable, producción lo será **igual o más**. Esta asimetría es una característica de diseño, no un defecto.
 
-#### 🏛️ Asignación de Portafolio Avanzada: Adaptive HRP Shrinkage & S&P 500 Benchmarks
+#### 🏛️ Asignación de Portafolio Avanzada: Torneo Automático (HRP vs 1/N) & S&P 500 Benchmarks
 
-Para evitar que la volatilidad de ciertos activos castigue injustamente a campeones de alto Alpha (como ECH u Oro) y adaptar el rebalanceo a cualquier número variable $N$ de activos activos ($N=1, 2, 3, 5, 7...$), el motor utiliza **HRP Shrinkage Bayesiano**:
+Para garantizar el máximo retorno posible sin comprometer la seguridad de la cuenta, el sistema ejecuta un **Torneo de Asignación de Portafolio en Tiempo Real (HRP vs 1/N)**:
 
-1. **Shrinkage Bayesiano Ponderado por Performance ($\lambda = 0.70$):**  
-   $$w_{\text{final}} = 0.30 \cdot w_{\text{HRP}} + 0.70 \cdot w_{\text{Sharpe\_Target}}$$
-   Combina la estructura de covarianza descorrelacionada de López de Prado (2016) con un vector objetivo dinámico basado en el **Ratio Sharpe rodante de los últimos 100 días** de cada activo. En lugar de un $1/N$ plano e indiferente a la calidad del retorno, canaliza capital prioritariamente hacia las estrategias con mayor Alpha y consistencia reciente.
+1. **Torneo de Asignación Automática (Fallback por Superioridad):**  
+   Compara continuamente el desempeño del portafolio HRP contra el portafolio $1/N$ (Naive Diversification). Si en el período evaluado el HRP no logra superar al $1/N$ en ROI o Ratio Sharpe, **el sistema activa automáticamente el Fallback $1/N$ (14.28% de peso por activo)**, garantizando exportar a `hrp_weights.json` la asignación que objetivamente maximiza el retorno.
 
-2. **Límites Dinámicos Adaptables a $N$ ($Dynamic Clamping$):**  
-   Los límites máximo y mínimo de peso por activo se recalculan automáticamente en función de la cantidad $N$ de campeones activos:
-   $$w_{\min} = \frac{0.25}{N} \qquad \text{y} \qquad w_{\max} = \min\left(0.60, \; \frac{2.0}{N}\right)$$
-   *(Para $N=5$: Mín 5%, Máx 40%. Para $N=2$: Mín 12.5%, Máx 60%).*
+2. **Shrinkage Bayesiano Ponderado por Performance ($\lambda = 0.85$):**  
+   Cuando se usa HRP, combina la estructura de covarianza de López de Prado (2016) con un vector objetivo dinámico basado en el **Ratio Sharpe rodante de los últimos 100 días** ($\lambda = 0.85$).
+
+3. **Límites Dinámicos Adaptables a $N$ ($Dynamic Clamping$):**  
+   $$w_{\min} = \frac{0.15}{N} \qquad \text{y} \qquad w_{\max} = \min\left(0.55, \; \frac{2.5}{N}\right)$$
 
 3. **Benchmarks Directos del S&P 500:**  
    El portafolio global evalúa automáticamente su desempeño contra 4 competidores institucionales:
