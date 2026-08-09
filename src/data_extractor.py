@@ -184,23 +184,22 @@ class DataExtractor:
 if __name__ == "__main__":
     from preprocessing.asset_screener import AssetScreener
     
-    target_extractions = [
-        {"nombre": "EURUSD", "ticker": "EURUSD", "timeframe": mt5.TIMEFRAME_D1, "filename": "EURUSD_daily.csv"},
-        {"nombre": "EURUSD_H4", "ticker": "EURUSD", "timeframe": mt5.TIMEFRAME_H4, "filename": "EURUSD_H4_daily.csv"},
-        {"nombre": "SP500", "ticker": "SP500", "timeframe": mt5.TIMEFRAME_D1, "filename": "SP500_daily.csv"},
-        {"nombre": "SP500_H4", "ticker": "SP500", "timeframe": mt5.TIMEFRAME_H4, "filename": "SP500_H4_daily.csv"},
-        {"nombre": "Oro", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_D1, "filename": "Oro_daily.csv"},
-        {"nombre": "Oro_H4", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_H4, "filename": "Oro_H4_daily.csv"},
-    ]
-    
-    # 🔍 PASO 0: Screening Cuantitativo de Universo (Hurst Exponent + Descorrelación)
+    # 🔍 PASO 0: Screening Cuantitativo de Universo Dinámico (Descubrimiento MT5 + Hurst R/S + Descorrelación)
     conn_screen = MT5Connector()
     if conn_screen.connect():
         screener = AssetScreener(conn_screen)
-        screen_res = screener.screen_universe(target_extractions)
-        approved_names = screen_res.get("cesta_final", [t["nombre"] for t in target_extractions])
-        target_extractions = [t for t in target_extractions if t["nombre"] in approved_names]
+        screen_res = screener.screen_universe(candidates=None, min_hurst=0.55, max_corr=0.80)
+        target_extractions = screen_res.get("items_finales", [])
         conn_screen.shutdown()
+    else:
+        target_extractions = [
+            {"nombre": "EURUSD", "ticker": "EURUSD", "timeframe": mt5.TIMEFRAME_D1, "filename": "EURUSD_daily.csv"},
+            {"nombre": "EURUSD_H4", "ticker": "EURUSD", "timeframe": mt5.TIMEFRAME_H4, "filename": "EURUSD_H4_daily.csv"},
+            {"nombre": "SP500", "ticker": "SP500", "timeframe": mt5.TIMEFRAME_D1, "filename": "SP500_daily.csv"},
+            {"nombre": "SP500_H4", "ticker": "SP500", "timeframe": mt5.TIMEFRAME_H4, "filename": "SP500_H4_daily.csv"},
+            {"nombre": "Oro", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_D1, "filename": "Oro_daily.csv"},
+            {"nombre": "Oro_H4", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_H4, "filename": "Oro_H4_daily.csv"},
+        ]
     
     # Intentamos desde el año 2000
     end_dt = datetime.now()
