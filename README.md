@@ -111,7 +111,14 @@ Para que un modelo sea exportado a `campeon_*.json` y desplegado en vivo, el sis
 
 3. **Métricas Avanzadas en Cartera Global**:
    - **CAGR**: Tasa de Crecimiento Anual Compuesta equivalente.
-   - **STA quant-trading-bot/
+   - **STARR Ratio ($\text{CAGR} / |\text{MDD}|$)**: Eficiencia de dolor/recompensa. Mide la ganancia ganada por cada punto de caída acumulada.
+
+---
+
+## 📁 Estructura del Proyecto
+
+```text
+quant-trading-bot/
  |-- src/
  |   |-- preprocessing/
  |   |   |-- asset_screener.py     # Screening Fase 0: Exponente de Hurst y Descorrelación
