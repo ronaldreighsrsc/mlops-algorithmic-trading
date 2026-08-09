@@ -111,16 +111,10 @@ Para que un modelo sea exportado a `campeon_*.json` y desplegado en vivo, el sis
 
 3. **Métricas Avanzadas en Cartera Global**:
    - **CAGR**: Tasa de Crecimiento Anual Compuesta equivalente.
-   - **STARR Ratio ($\text{CAGR} / |\text{MDD}|$)**: Eficiencia de dolor/recompensa. Mide la ganancia ganada por cada punto de caída acumulada.
-
----
-
-## 📁 Estructura del Proyecto
-
-```text
-quant-trading-bot/
+   - **STA quant-trading-bot/
  |-- src/
  |   |-- preprocessing/
+ |   |   |-- asset_screener.py     # Screening Fase 0: Exponente de Hurst y Descorrelación
  |   |   |-- stationarity.py       # Transformación FFD y Test ADF
  |   |   |-- triple_barrier.py     # Etiquetado de meta-labeling
  |   |   |-- volatility.py         # Cálculo de EGARCH
@@ -141,8 +135,9 @@ quant-trading-bot/
  |   |   |-- risk_manager.py       # Monitor Híbrido de Riesgo (HMM + Autoencoder)
  |   |-- main_training.py          # Pipeline maestro de Retuning de Obreros (Walk-Forward)
  |   |-- main_preprocessing.py     # Pipeline maestro de Preprocesamiento (FFD, EGARCH, Triple Barrera)
- |   |-- data_extractor.py         # Conexión a MT5 y Yahoo Finance
+ |   |-- data_extractor.py         # Conexión a MT5 (Integra Fase 0 AssetScreener + Extracción)
  |-- results/                      # ⚠️ Ignorado por .gitignore (Protección de Alpha)
+ |   |-- active_assets.json        # Dictamen del Screening de Universo Fase 0
  |   |-- saved_models/             # Modelos ML/DL entrenados (.pkl)
  |   |-- mlops_monitors/           # HMM y Autoencoder pre-entrenados por portfolio_backtester
  |   |-- *.npy                     # Probabilidades In-Sample y Out-of-Sample
@@ -160,7 +155,7 @@ El sistema está diseñado para fluir de manera secuencial. Cada paso depende de
 python src/data_extractor.py
 python src/main_preprocessing.py
 ```
-*Se conecta a MT5 y Yahoo Finance para extraer velas desde el año 2000 en múltiples temporalidades descorrelacionadas (`D1`, `H4`, `H1`). Aplica FFD, EGARCH, Triple Barrera y alineamiento `ffill` de exógenas macro (VIX, DXY, Yield10Y, Macro Chile), manteniendo compatibilidad retroactiva por defecto con `D1`.*
+*Se conecta a MT5 para ejecutar automáticamente la **Fase 0 (AssetScreener)**: calcula el Exponente de Hurst ($H$) y la Matriz de Descorrelación para filtrar solo activos con memoria persistente. Luego extrae velas históricas desde el año 2000 en múltiples temporalidades (`D1`, `H4`, `H1`). Aplica FFD, EGARCH, Triple Barrera y alineamiento `ffill` de exógenas macro (VIX, DXY, Yield10Y).*ades descorrelacionadas (`D1`, `H4`, `H1`). Aplica FFD, EGARCH, Triple Barrera y alineamiento `ffill` de exógenas macro (VIX, DXY, Yield10Y, Macro Chile), manteniendo compatibilidad retroactiva por defecto con `D1`.*
 
 #### 🌐 Ingeniería Macro Híbrida para Detección de Regímenes con HMM:
 Para evitar el sesgo por falta de estacionariedad en modelos Gaussianos HMM (`HMMRegimeDetector`):
