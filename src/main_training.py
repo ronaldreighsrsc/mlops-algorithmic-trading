@@ -27,7 +27,23 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 # ==============================================================================
 # CONFIGURACIÓN DEL EXPERIMENTO
 # ==============================================================================
-ACTIVOS_A_CORRER = ["EURUSD_H4", "SP500_H4", "Oro_H4"] #["ECH", "EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4"]
+import json
+
+def get_active_assets_from_json():
+    """Carga dinámicamente la lista de activos aprobados por el screening de Fase 0"""
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    json_path = os.path.join(base_dir, "results", "active_assets.json")
+    if os.path.exists(json_path):
+        try:
+            with open(json_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                return data.get("cesta_final", ["EURUSD", "SP500", "Oro"])
+        except Exception as e:
+            print(f"⚠️ Error leyendo active_assets.json: {e}")
+    return ["EURUSD", "SP500", "Oro"]
+
+# Carga dinámica de universo aprobado
+ACTIVOS_A_CORRER = get_active_assets_from_json()
 MODELOS_A_CORRER = [
     'RANDOM_FOREST',
     'XGBOOST', 
@@ -43,25 +59,39 @@ XGB_GRID = {'n_estimators': [200, 500, 1000], 'max_depth': [3, 5, 7, 9], 'learni
 NN_GRID = {'units': [32, 64, 128, 256], 'dropout': [0.1, 0.2, 0.3]}
 HIBRIDO_RF_GRID = {'units': [32, 64, 128], 'dropout': [0.1, 0.2, 0.3]}
 
-# Bancos de Variables Dinámicos por Activo
+# Taxonomía Cuantitativa de Bancos de Exógenas por Clase de Activo (Asset Class Taxonomy)
 def get_bancos_por_activo(activo: str):
-    base_asset = activo.split("_")[0]
+    base_asset = activo.split("_")[0].upper()
     precio_puro = ['open_FFD', 'high_FFD', 'low_FFD']
     tecnicos = ['MACD_Hist', 'RSI', 'ATR', 'EGARCH_Vol']
     
-    if base_asset in ["ECH", "IPSA"]:
-        macros = ['TPM', 'EMBI', 'Copper_FFD', 'Yield10Y_FFD', 'USDCLP_FFD']
-        globales = ['SP500_FFD', 'VIX_close', 'FXI_FFD']
-    elif base_asset in ["EURUSD", "SP500"]:
+    # 1. TAXONOMÍA FOREX (EURUSD, GBPUSD, USDJPY, AUDUSD, USDCAD, USDCHF, EURGBP, etc.)
+    is_forex = any(currency in base_asset for currency in ["EUR", "USD", "GBP", "JPY", "AUD", "NZD", "CAD", "CHF", "MXN", "NOK", "SEK", "SGD"]) and not any(k in base_asset for k in ["SP500", "US500", "NAS100", "US100"])
+    
+    # 2. TAXONOMÍA ÍNDICES (SP500, US500, NAS100, US100, GER40, DE40, UK100, JPN225)
+    is_index = any(idx in base_asset for idx in ["SP500", "US500", "NAS100", "US100", "GER40", "DE40", "UK100", "JPN225", "IPSA"])
+    
+    # 3. TAXONOMÍA METALES PRECIOSOS (ORO, XAUUSD, PLATA, XAGUSD)
+    is_metal = any(metal in base_asset for metal in ["ORO", "XAUUSD", "PLATA", "XAGUSD"])
+    
+    # 4. TAXONOMÍA ENERGÍA (WTI, XTIUSD, XBRUSD, BRENT)
+    is_energy = any(energy in base_asset for energy in ["WTI", "XTIUSD", "XBRUSD", "BRENT"])
+    
+    if is_forex:
+        macros = ['Yield10Y_FFD']
+        globales = ['DXY_close_FFD', 'VIX_close']
+    elif is_index:
         macros = ['Yield10Y_FFD']
         globales = ['VIX_close', 'DXY_close_FFD']
-    elif base_asset == "Oro":
+    elif is_metal:
         macros = ['Yield10Y_FFD', 'DXY_close_FFD'] 
-        globales = ['SP500_FFD', 'VIX_close']
+        globales = ['VIX_close']
+    elif is_energy:
+        macros = ['DXY_close_FFD']
+        globales = ['VIX_close']
     else:
-        macros = []
-        globales = []
-
+        macros = ['Yield10Y_FFD']
+        globales = ['VIX_close', 'DXY_close_FFD']
 
     bancos = {
         "Precio_Puro": precio_puro,
@@ -70,7 +100,6 @@ def get_bancos_por_activo(activo: str):
         "Macros": macros,
         "Globales": globales,
         "Hibrido_Precio_Tec_Vol": precio_puro + tecnicos + ['tick_volume'],
-        #"Kitchen_Sink_Total": precio_puro + tecnicos + macros + globales + ['tick_volume']
     }
     # Filtrar bancos vacíos
     return {k: v for k, v in bancos.items() if v}
