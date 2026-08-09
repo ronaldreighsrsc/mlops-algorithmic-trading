@@ -187,7 +187,7 @@ class CPCVAuditor:
 
 if __name__ == "__main__":
     import json
-    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4"]
     
     for symbol in activos:
         proc_path = os.path.join(base_dir, "data", "processed", f"{symbol}_processed.csv")

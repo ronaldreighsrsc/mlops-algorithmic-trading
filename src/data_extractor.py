@@ -189,7 +189,6 @@ if __name__ == "__main__":
         {"nombre": "SP500_H4", "ticker": "SP500", "timeframe": mt5.TIMEFRAME_H4, "filename": "SP500_H4_daily.csv"},
         {"nombre": "Oro", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_D1, "filename": "Oro_daily.csv"},
         {"nombre": "Oro_H4", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_H4, "filename": "Oro_H4_daily.csv"},
-        {"nombre": "ECH", "ticker": "ECH", "timeframe": mt5.TIMEFRAME_D1, "filename": "ECH_daily.csv"},
     ]
     
     # Intentamos desde el año 2000
@@ -205,16 +204,8 @@ if __name__ == "__main__":
         
         logging.info(f"\n--- Iniciando ciclo de extracción aislado para {nombre} ({ticker}) ---")
         
-        # Para ECH, saltar MT5 e ir directo a yfinance
-        if ticker == "ECH":
-            extractor = DataExtractor(None)
-            df_activo = extractor.get_historical_data_yfinance(ticker, start_dt, end_dt)
-            if not df_activo.empty:
-                df_activo.reset_index(inplace=True)
-                extractor.save_to_csv(df_activo, filename)
-        else:
-            conn = MT5Connector()
-            if conn.connect():
+        conn = MT5Connector()
+        if conn.connect():
                 extractor = DataExtractor(conn)
                 df_activo = extractor.get_historical_data_chunked(
                     symbol=ticker, 

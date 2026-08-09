@@ -137,37 +137,22 @@ class TradingBot:
         logging.info(f"Modelo Predictivo {self.config['model_type']} cargado exitosamente (Banco: {self.config['banco']}, Umbral: >{self.config['confidence_threshold']:.0%}).")
 
     def fetch_live_data(self) -> pd.DataFrame:
-        """Descarga las ultimas velas necesarias para generar las variables (ej. FFD, EGARCH)"""
+        """Descarga las ultimas velas necesarias para generar las variables (ej. FFD, EGARCH) desde MT5."""
         import yfinance as yf
         from datetime import timedelta
         end_date = datetime.now()
         start_date = end_date - timedelta(days=3000)
         
-        if self.symbol == "ECH":
-            df = yf.download(self.symbol, start=start_date, end=end_date, progress=False)
-            if df.empty:
-                logging.error(f"Fallo al descargar datos live para {self.symbol} vía yfinance.")
-                return pd.DataFrame()
-                
-            df.columns = [c[0].lower() if isinstance(c, tuple) else c.lower() for c in df.columns]
-            df.rename(columns={'volume': 'real_volume', 'adj close': 'adj_close'}, inplace=True)
-            df['tick_volume'] = df['real_volume']
-            df['spread'] = 0.0
+        # Flujo nativo MT5
+        rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 2000)
+        if rates is None or len(rates) == 0:
+            logging.error(f"[{self.symbol}] No se pudieron obtener datos historicos de MT5.")
+            return pd.DataFrame()
             
-            df.index = df.index.tz_localize(None).normalize()
-            df.index.name = 'time'
-            
-        else:
-            # Flujo normal para MT5
-            rates = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 2000)
-            if rates is None or len(rates) == 0:
-                logging.error("No se pudieron obtener datos historicos de MT5.")
-                return pd.DataFrame()
-                
-            df = pd.DataFrame(rates)
-            df['time'] = pd.to_datetime(df['time'], unit='s')
-            df.set_index('time', inplace=True)
-            df.index = df.index.normalize()
+        df = pd.DataFrame(rates)
+        df['time'] = pd.to_datetime(df['time'], unit='s')
+        df.set_index('time', inplace=True)
+        df.index = df.index.normalize()
 
         # --- Descargar Macro Global ---
         vix = yf.download("^VIX", start=start_date, end=end_date, progress=False)
@@ -189,19 +174,6 @@ class TradingBot:
         if 'DXY_close' in df.columns: df['DXY_close'] = df['DXY_close'].ffill().bfill()
         if 'Yield10Y' in df.columns: df['Yield10Y'] = df['Yield10Y'].ffill().bfill()
 
-        # --- Descargar Macro Chile (Solo si es ECH) ---
-        if self.symbol == "ECH":
-            import sys
-            import os
-            sys.path.append(os.path.dirname(os.path.abspath(__file__)) + "/..")
-            from preprocessing.chilean_macro import ChileanMacroExtractor
-            macro_chile = ChileanMacroExtractor()
-            df_chile = macro_chile.get_chilean_macro_data(start_date, end_date)
-            if not df_chile.empty:
-                df = df.join(df_chile, how='left')
-                cols_chile = df_chile.columns
-                df[cols_chile] = df[cols_chile].ffill().bfill()
-                
         df.reset_index(inplace=True)
         return df
 
@@ -386,52 +358,38 @@ class TradingBot:
             )
             return
             
-        # Calculos de Riesgo
+        # Calculos de Riesgo MT5
         last_vol = df_proc['EGARCH_Vol'].iloc[-1]
-        
-        if self.symbol == "ECH":
-            # ECH usa Yahoo Finance, no tenemos MT5 tick info
-            current_price = df_proc['close'].iloc[-1]
-            lots = 0.0 # No podemos ejecutar lotes en MT5
-            account_balance = 500.0 # Balance asumido para la alerta de telegram
+        sym_info = self.engine.get_symbol_info(self.symbol)
+        if sym_info is None:
+            return
             
-            if is_long:
-                tp_price, sl_price = self.risk_manager.calculate_triple_barrier_levels(current_price, last_vol)
-            else:
-                vol_decimal = last_vol / 100.0
-                tp_price = current_price * (1 - self.risk_manager.k_up * vol_decimal)
-                sl_price = current_price * (1 + self.risk_manager.k_down * vol_decimal)
+        account_info = mt5.account_info()
+        account_balance = account_info.balance if account_info else 10000.0
+        
+        if is_long:
+            current_price = mt5.symbol_info_tick(self.symbol).ask
+            tp_price, sl_price = self.risk_manager.calculate_triple_barrier_levels(current_price, last_vol)
         else:
-            sym_info = self.engine.get_symbol_info(self.symbol)
-            if sym_info is None:
-                return
-                
-            account_info = mt5.account_info()
-            account_balance = account_info.balance
-            
-            if is_long:
-                current_price = mt5.symbol_info_tick(self.symbol).ask
-                tp_price, sl_price = self.risk_manager.calculate_triple_barrier_levels(current_price, last_vol)
-            else:
-                # SHORT: TP abajo, SL arriba (invertido)
-                current_price = mt5.symbol_info_tick(self.symbol).bid
-                vol_decimal = last_vol / 100.0
-                tp_price = current_price * (1 - self.risk_manager.k_up * vol_decimal)
-                sl_price = current_price * (1 + self.risk_manager.k_down * vol_decimal)
-            
-            lots = self.risk_manager.calculate_position_size(
-                balance=account_balance,
-                current_price=current_price,
-                stop_loss_price=sl_price,
-                tick_size=sym_info['tick_size'],
-                tick_value=sym_info['tick_value'],
-                volume_step=sym_info['volume_step'],
-                prediction_prob=prob,
-                confidence_threshold=self.config["confidence_threshold"]
-            )
+            # SHORT: TP abajo, SL arriba (invertido)
+            current_price = mt5.symbol_info_tick(self.symbol).bid
+            vol_decimal = last_vol / 100.0
+            tp_price = current_price * (1 - self.risk_manager.k_up * vol_decimal)
+            sl_price = current_price * (1 + self.risk_manager.k_down * vol_decimal)
         
-        # Validacion de volumenes minimos del broker (Solo si no es ECH)
-        if self.symbol != "ECH" and lots < sym_info['volume_min']:
+        lots = self.risk_manager.calculate_position_size(
+            balance=account_balance,
+            current_price=current_price,
+            stop_loss_price=sl_price,
+            tick_size=sym_info['tick_size'],
+            tick_value=sym_info['tick_value'],
+            volume_step=sym_info['volume_step'],
+            prediction_prob=prob,
+            confidence_threshold=self.config["confidence_threshold"]
+        )
+        
+        # Validacion de volumenes minimos del broker
+        if lots < sym_info['volume_min']:
             logging.warning(f"Volumen calculado ({lots}) es menor al minimo permitido ({sym_info['volume_min']}). Abortando trade.")
             return
         
@@ -464,13 +422,10 @@ class TradingBot:
         )
 
         # 6. Enviar orden a MT5
-        if self.symbol != "ECH":
-            if is_long:
-                self.engine.send_market_buy_order(self.symbol, lots, sl_price, tp_price)
-            else:
-                self.engine.send_market_sell_order(self.symbol, lots, sl_price, tp_price)
+        if is_long:
+            self.engine.send_market_buy_order(self.symbol, lots, sl_price, tp_price)
         else:
-            logging.info(f"Símbolo ECH detectado. Alerta enviada a Telegram. Ejecución MT5 saltada ya que se opera en Quantfury.")
+            self.engine.send_market_sell_order(self.symbol, lots, sl_price, tp_price)
 
     def _log_to_live_journal(self, prob: float, signal: str, status: str, 
                              price: float, tp: float, sl: float, 
@@ -657,14 +612,13 @@ class TradingBot:
             end_date = datetime.now()
             start_date = end_date - timedelta(days=180) # 100 días hábiles aprox
             
-            activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+            activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4"]
             returns_dict = {}
             
             ticker_map = {
                 "EURUSD": "EURUSD=X", "EURUSD_H4": "EURUSD=X",
                 "SP500": "^GSPC", "SP500_H4": "^GSPC",
-                "Oro": "GC=F", "Oro_H4": "GC=F",
-                "ECH": "ECH"
+                "Oro": "GC=F", "Oro_H4": "GC=F"
             }
             
             for act in activos:

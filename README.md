@@ -13,6 +13,33 @@ El bot está dividido en 5 pilares fundamentales:
 3. **Volatilidad Condicional (EGARCH)**: Ajusta el ancho de las barreras de TP/SL diariamente según la volatilidad proyectada del mercado.
 4. **Machine Learning Predictivo**: Redes Neuronales (LSTM, BiLSTM), Gradient Boosting (XGBoost) e Híbridos (ARIMA-LSTM) entrenados con Validación Cruzada Purgada y Embargo (Purged K-Fold) + Walk-Forward Optimization para prevenir fuga de datos temporales.
 5. **Gestión de Riesgo (Kelly Dinámico)**: Escala el lote de inversión dinámicamente (0.5x, 1.0x, 2.0x) según la fuerza de la probabilidad estadística predicha.
+6. **Pipeline Cuantitativo de Selección de Activos (Darwinex Native Universe)**: Filtrado riguroso en 4 etapas (Exponente de Hurst $H > 0.55$, Matriz de Descorrelación Cross-Asset $|\rho| < 0.40$ y Auditoría CPCV $SR_{\text{OOS}} > 0.70$) para construir una cesta de activos 100% ejecutable en MetaTrader 5.
+
+> [!NOTE]
+> **Arquitectura de Ramas & Producción Nativa MT5:**
+> La rama `main` opera de forma **100% nativa en MetaTrader 5 / Darwinex** (`EURUSD`, `EURUSD_H4`, `SP500`, `SP500_H4`, `Oro`, `Oro_H4`). Todo desarrollo experimental con activos fuera de MT5 (como ETFs de Quantfury / Yahoo Finance tipo ECH) se resguarda en la rama `experimental/multi-asset-ech`.
+
+---
+
+## 🎯 Pipeline Cuantitativo de Selección de Activos (Asset Universe Screening)
+
+Para definir *qué activos integran el portafolio* antes de asignar pesos mediante $1/N$ o HRP, el sistema implementa un screening de 4 fases:
+
+```mermaid
+flowchart TD
+    A["Universo de Activos Líquidos Darwinex/MT5"] --> B["1. Filtro de Estructura: Exponente de Hurst (H > 0.55)"]
+    B --> C["2. Filtro de Descorrelación Cross-Asset (|ρ| < 0.40)"]
+    C --> D["3. Auditoría CPCV / OOS Sharpe (> 0.70)"]
+    D --> E["Cesta Elegible de Producción (Rebalanceo 1/N / HRP)"]
+```
+
+1. **Universo Ejecutable Líquido MT5:**
+   - **FX Majors:** `EURUSD`, `GBPUSD`, `USDJPY`
+   - **Índices Globales:** `US500` (SP500), `NAS100` (Nasdaq), `GER40` (DAX)
+   - **Commodities:** `XAUUSD` (Oro), `XTIUSD` (Petróleo WTI)
+2. **Exponente de Hurst ($H > 0.55$):** Filtra activos con memoria de tendencia persistente. Si $H \approx 0.50$ (ruido aleatorio), el activo se descarta para evitar sobreajuste.
+3. **Filtro de Descorrelación Cross-Asset ($|\rho| < 0.40$):** Previene colinealidad en el riesgo acumulado de la cuenta.
+4. **Filtro OOS Sharpe ($SR_{\text{OOS}} > 0.70$):** Condición innegociable de inclusión tras superar la validación cruzada combinatoria (CPCV).
 
 ---
 

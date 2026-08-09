@@ -332,7 +332,7 @@ if __name__ == "__main__":
     RIESGO_PCT = 0.045       # 4.5% riesgo base por trade (optimizado para presupuesto MDD < 15%)
     FAST_MODE = True         # True: Carga monitores MLOps rápido | False: Re-entrena MLOps de cero
     
-    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4"]
 
     # 1. Simulación Individual (Silos)
     series_retornos = {}

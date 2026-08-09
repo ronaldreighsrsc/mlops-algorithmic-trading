@@ -929,7 +929,7 @@ def main():
     data_dir = os.path.join(base_dir, "data")
     results_dir = os.path.join(base_dir, "results")
     
-    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4", "ECH"]
+    activos = ["EURUSD", "EURUSD_H4", "SP500", "SP500_H4", "Oro", "Oro_H4"]
     modelos = ['RANDOM_FOREST', 'XGBOOST', 'LSTM', 'BILSTM', 'ARIMA_LSTM', 'LSTM_RF']
     
     from main_training import get_bancos_por_activo
