@@ -173,12 +173,45 @@ class DataExtractor:
             logging.error(f"Error descargando {symbol} por yfinance: {e}")
             return pd.DataFrame()
 
-    def save_to_csv(self, df: pd.DataFrame, filename: str):
-        if df.empty:
+    def get_existing_last_date(self, filename: str) -> Optional[datetime]:
+        """
+        Si el archivo CSV ya existe en data/raw/, retorna la última fecha registrada
+        para hacer una actualización incremental rápida en lugar de re-descargar años de datos.
+        """
+        file_path = os.path.join(self.raw_dir, filename)
+        if os.path.exists(file_path):
+            try:
+                df_old = pd.read_csv(file_path)
+                if 'time' in df_old.columns and not df_old.empty:
+                    df_old['time'] = pd.to_datetime(df_old['time'])
+                    last_dt = df_old['time'].max()
+                    # Si el formato contiene hora/minuto, restar 1 día para seguridad
+                    return last_dt.to_pydatetime()
+            except Exception as e:
+                logging.warning(f"No se pudo leer la última fecha de {filename}: {e}")
+        return None
+
+    def save_to_csv(self, df_new: pd.DataFrame, filename: str):
+        if df_new.empty:
             return
         os.makedirs(self.raw_dir, exist_ok=True)
         file_path = os.path.join(self.raw_dir, filename)
-        df.to_csv(file_path, index=False)
+        
+        if os.path.exists(file_path):
+            try:
+                df_old = pd.read_csv(file_path)
+                df_combined = pd.concat([df_old, df_new], ignore_index=True)
+                if 'time' in df_combined.columns:
+                    df_combined['time'] = pd.to_datetime(df_combined['time'])
+                    df_combined.sort_values('time', inplace=True)
+                    df_combined.drop_duplicates(subset=['time'], keep='last', inplace=True)
+                df_combined.to_csv(file_path, index=False)
+                logging.info(f"⚡ [UPDATE INCREMENTAL] Actualizado {filename} (Total: {len(df_combined)} registros).")
+                return
+            except Exception as e:
+                logging.warning(f"Error fusionando datos incrementales para {filename}, se sobrescribirá: {e}")
+                
+        df_new.to_csv(file_path, index=False)
         logging.info(f"Datos guardados exitosamente en: {file_path}")
 
 if __name__ == "__main__":
@@ -201,9 +234,7 @@ if __name__ == "__main__":
             {"nombre": "Oro_H4", "ticker": "XAUUSD", "timeframe": mt5.TIMEFRAME_H4, "filename": "Oro_H4_daily.csv"},
         ]
     
-    # Intentamos desde el año 2000
     end_dt = datetime.now()
-    start_dt = datetime(2000, 1, 1)
     
     # TRUCO DEL USUARIO: Reconectar (Abrir y Cerrar) por cada activo/timeframe
     for item in target_extractions:
@@ -212,23 +243,33 @@ if __name__ == "__main__":
         tf = item["timeframe"]
         filename = item["filename"]
         
-        logging.info(f"\n--- Iniciando ciclo de extracción aislado para {nombre} ({ticker}) ---")
-        
         conn = MT5Connector()
         if conn.connect():
-                extractor = DataExtractor(conn)
-                df_activo = extractor.get_historical_data_chunked(
-                    symbol=ticker, 
-                    timeframe=tf,
-                    start_date=start_dt, 
-                    end_date=end_dt
-                )
-                
-                if not df_activo.empty:
-                    df_activo.reset_index(inplace=True)
-                    extractor.save_to_csv(df_activo, filename)
-                    
-                conn.shutdown() # Cerramos la conexión específica de este activo
+            extractor = DataExtractor(conn)
             
-        time.sleep(1) # Pausa técnica antes de abrir la siguiente conexión
+            # ⚡ DETECCIÓN DE ACTUALIZACIÓN INCREMENTAL
+            last_date = extractor.get_existing_last_date(filename)
+            if last_date is not None:
+                # Si el archivo ya existe, descargamos solo desde el último día registrado
+                start_dt = max(datetime(2000, 1, 1), last_date - pd.Timedelta(days=1))
+                logging.info(f"\n--- [INCREMENTAL] Actualizando {nombre} ({ticker}) desde {start_dt.strftime('%Y-%m-%d')} ---")
+            else:
+                # Descarga limpia desde el 2000
+                start_dt = datetime(2000, 1, 1)
+                logging.info(f"\n--- [DESCARGA COMPLETA] Extracción desde 2000 para {nombre} ({ticker}) ---")
+                
+            df_activo = extractor.get_historical_data_chunked(
+                symbol=ticker, 
+                timeframe=tf,
+                start_date=start_dt, 
+                end_date=end_dt
+            )
+            
+            if not df_activo.empty:
+                df_activo.reset_index(inplace=True)
+                extractor.save_to_csv(df_activo, filename)
+                
+            conn.shutdown()
+            
+        time.sleep(0.5)
 
