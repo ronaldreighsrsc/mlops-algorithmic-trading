@@ -3,6 +3,7 @@ import MetaTrader5 as mt5
 import pandas as pd
 from datetime import datetime
 import datetime as dt
+from typing import Optional, List, Dict
 import logging
 from mt5_connector import MT5Connector
 import time
