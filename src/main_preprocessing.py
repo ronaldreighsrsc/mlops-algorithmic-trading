@@ -12,14 +12,12 @@ from preprocessing.auditor import DataAuditor
 
 warnings.filterwarnings("ignore")
 
-def run_preprocessing_pipeline():
+def run_preprocessing_pipeline(force: bool = False):
     print("🚀 Iniciando Pipeline de Preprocesamiento de Datos (Fase 2)...")
     
-    # Buscar todos los archivos CSV descargados en la Fase 1
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     raw_dir = os.path.join(base_dir, "data", "raw")
     
-    # Asegurarnos de que la carpeta de destino exista (usando ruta absoluta)
     os.makedirs(os.path.join(base_dir, "data", "processed"), exist_ok=True)
     
     csv_files = glob.glob(os.path.join(raw_dir, "*.csv"))
@@ -35,10 +33,16 @@ def run_preprocessing_pipeline():
         output_filename = f"{ticker}_processed.csv"
         output_path = os.path.join(base_dir, "data", "processed", output_filename)
         
-        # ⚡ OPTIMIZACIÓN INCREMENTAL: Si ya existe en data/processed/, saltar re-procesamiento
-        if os.path.exists(output_path):
-            print(f"⏩ [SKIP] {output_filename} ya existe en data/processed/. Saltando re-procesamiento.")
-            continue
+        # ⚡ DETECCIÓN SMART INCREMENTAL:
+        # Solo salta si NO es forzado Y el archivo procesado existe Y es MÁS NUEVO que el archivo raw
+        if not force and os.path.exists(output_path):
+            raw_mtime = os.path.getmtime(file_path)
+            proc_mtime = os.path.getmtime(output_path)
+            if proc_mtime >= raw_mtime:
+                print(f"⏩ [SKIP] {output_filename} ya está actualizado. Saltando.")
+                continue
+            else:
+                print(f"🔄 [UPDATE] {filename} tiene nuevos datos descargados. Re-procesando...")
             
         print(f"\n{'='*50}")
         print(f"📈 PROCESANDO ACTIVO: {ticker}")
