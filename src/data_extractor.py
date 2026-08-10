@@ -192,6 +192,32 @@ class DataExtractor:
                 logging.warning(f"No se pudo leer la última fecha de {filename}: {e}")
         return None
 
+    @staticmethod
+    def sanitize_continuous_segment(df: pd.DataFrame, max_gap_days: int = 30) -> pd.DataFrame:
+        """
+        Detecta saltos temporales (huecos en la historia del broker) superiores a max_gap_days
+        y conserva únicamente la ventana continua más reciente para proteger la integridad del FFD y ML.
+        """
+        if df.empty or 'time' not in df.columns:
+            return df
+            
+        df_sorted = df.copy()
+        df_sorted['time'] = pd.to_datetime(df_sorted['time'])
+        df_sorted.sort_values('time', inplace=True)
+        
+        diffs = (df_sorted['time'] - df_sorted['time'].shift(1)).dt.days
+        gap_indices = df_sorted.index[diffs > max_gap_days].tolist()
+        
+        if gap_indices:
+            last_gap_idx = gap_indices[-1]
+            df_clean = df_sorted.loc[last_gap_idx:].copy()
+            t_start = df_clean['time'].iloc[0].strftime('%Y-%m-%d')
+            t_end = df_clean['time'].iloc[-1].strftime('%Y-%m-%d')
+            logging.info(f"🧹 [SANITIZADOR DE HUECOS] Se detectó un hueco > {max_gap_days} días. Dataset recortado a la serie contigua más reciente: {len(df_clean)} filas ({t_start} a {t_end}).")
+            return df_clean
+            
+        return df_sorted
+
     def save_to_csv(self, df_new: pd.DataFrame, filename: str):
         if df_new.empty:
             return
@@ -206,12 +232,15 @@ class DataExtractor:
                     df_combined['time'] = pd.to_datetime(df_combined['time'])
                     df_combined.sort_values('time', inplace=True)
                     df_combined.drop_duplicates(subset=['time'], keep='last', inplace=True)
+                
+                df_combined = self.sanitize_continuous_segment(df_combined)
                 df_combined.to_csv(file_path, index=False)
-                logging.info(f"⚡ [UPDATE INCREMENTAL] Actualizado {filename} (Total: {len(df_combined)} registros).")
+                logging.info(f"⚡ [UPDATE INCREMENTAL] Actualizado {filename} (Total: {len(df_combined)} registros contiguos).")
                 return
             except Exception as e:
                 logging.warning(f"Error fusionando datos incrementales para {filename}, se sobrescribirá: {e}")
                 
+        df_new = self.sanitize_continuous_segment(df_new)
         df_new.to_csv(file_path, index=False)
         logging.info(f"Datos guardados exitosamente en: {file_path}")
 
