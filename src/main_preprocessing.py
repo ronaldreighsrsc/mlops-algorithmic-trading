@@ -110,7 +110,10 @@ def run_preprocessing_pipeline(force: bool = False):
     print("\n🎉 TODOS LOS ACTIVOS PROCESADOS CON ÉXITO.")
 
 if __name__ == "__main__":
-    run_preprocessing_pipeline()
+    force_flag = "--force" in sys.argv or "-f" in sys.argv
+    if force_flag:
+        print("⚠️ Modo --force activado: Se re-procesarán TODOS los activos desde cero.")
+    run_preprocessing_pipeline(force=force_flag)
     
     # 6. Auditoría Final (POO)
     base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
