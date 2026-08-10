@@ -50,6 +50,12 @@ def run_preprocessing_pipeline():
         # Eliminar si hay NaNs en los precios (fines de semana, feriados raros)
         df.dropna(subset=['close'], inplace=True)
 
+        # Eliminar columnas compuestas 100% por ceros (ej: real_volume en Forex/CFDs en MT5)
+        zero_cols = [c for c in df.columns if pd.api.types.is_numeric_dtype(df[c]) and (df[c] == 0).all()]
+        if zero_cols:
+            print(f"🧹 Eliminando columnas compuestas 100% por ceros: {zero_cols}")
+            df.drop(columns=zero_cols, inplace=True)
+
         print(f"\n--- PASO 1: Ingeniería de Features Técnicos ---")
         # El precio objetivo en MT5 siempre es 'close'
         engineer = TechnicalFeatureEngineer(target_price_col='close')
