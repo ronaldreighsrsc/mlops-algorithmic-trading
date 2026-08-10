@@ -162,7 +162,14 @@ El sistema está diseñado para fluir de manera secuencial. Cada paso depende de
 python src/data_extractor.py
 python src/main_preprocessing.py
 ```
-*Se conecta a MT5 para ejecutar automáticamente la **Fase 0 (AssetScreener)**: calcula el Exponente de Hurst ($H$) y la Matriz de Descorrelación para filtrar solo activos con memoria persistente. Luego extrae velas históricas desde el año 2000 en múltiples temporalidades (`D1`, `H4`, `H1`). Aplica FFD, EGARCH, Triple Barrera y alineamiento `ffill` de exógenas macro (VIX, DXY, Yield10Y).*ades descorrelacionadas (`D1`, `H4`, `H1`). Aplica FFD, EGARCH, Triple Barrera y alineamiento `ffill` de exógenas macro (VIX, DXY, Yield10Y, Macro Chile), manteniendo compatibilidad retroactiva por defecto con `D1`.*
+*Se conecta a MT5 para ejecutar automáticamente la **Fase 0 (AssetScreener)**: calcula el Exponente de Hurst ($H$) y la Matriz de Descorrelación para filtrar solo activos con memoria persistente. Luego extrae velas históricas desde el año 2000 en múltiples temporalidades (`D1`, `H4`, `H1`). Aplica FFD, EGARCH, Triple Barrera y alineamiento `ffill` de exógenas macro (VIX, DXY, Yield10Y).*
+
+> [!TIP]
+> **Preprocesamiento Incremental e Invocación Forzada:**
+> `main_preprocessing.py` utiliza comparación inteligente de marcas de tiempo (`mtime`). Si los datos crudos no han cambiado, salta el activo en 0.001s. Si deseas forzar el re-procesamiento completo de todos los activos desde cero (por ejemplo, tras modificar la lógica de un indicador), ejecuta:
+> ```bash
+> python src/main_preprocessing.py --force
+> ```
 
 #### 🌐 Ingeniería Macro Híbrida para Detección de Regímenes con HMM:
 Para evitar el sesgo por falta de estacionariedad en modelos Gaussianos HMM (`HMMRegimeDetector`):
