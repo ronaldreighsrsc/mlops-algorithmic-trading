@@ -32,7 +32,14 @@ def run_preprocessing_pipeline():
     for file_path in csv_files:
         filename = os.path.basename(file_path)
         ticker = filename.replace("_daily.csv", "")
+        output_filename = f"{ticker}_processed.csv"
+        output_path = os.path.join(base_dir, "data", "processed", output_filename)
         
+        # ⚡ OPTIMIZACIÓN INCREMENTAL: Si ya existe en data/processed/, saltar re-procesamiento
+        if os.path.exists(output_path):
+            print(f"⏩ [SKIP] {output_filename} ya existe en data/processed/. Saltando re-procesamiento.")
+            continue
+            
         print(f"\n{'='*50}")
         print(f"📈 PROCESANDO ACTIVO: {ticker}")
         print(f"{'='*50}")
