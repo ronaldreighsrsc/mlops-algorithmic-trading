@@ -1,9 +1,13 @@
 import math
-
+from typing import Optional, Tuple, Dict
 import numpy as np
 import os
 import joblib
 from models.anomaly_detector import StrategyLSTMAutoencoder, HMMRegimeDetector
+try:
+    from models.regime_detector import InstitutionalRegimeDetector, RegimeDiagnosis
+except ImportError:
+    from src.models.regime_detector import InstitutionalRegimeDetector, RegimeDiagnosis
 
 class HybridRiskMonitor:
     """
@@ -11,10 +15,12 @@ class HybridRiskMonitor:
     Sustituye al antiguo CUSUM. Utiliza:
     1. HMM para contexto Macro (Reducir riesgo en Crisis).
     2. LSTM Autoencoder para contexto Micro (Apagar estrategia si hay anomalía intrínseca).
+    3. InstitutionalRegimeDetector (v2.0) para 3 estados de mercado y test KS de deriva.
     """
     def __init__(self, data_dir: str = None):
         self.hmm_model = None
         self.lstm_model = None
+        self.regime_detector: Optional[InstitutionalRegimeDetector] = None
         self.is_dead = False
         self.current_risk_multiplier = 1.0
         
@@ -22,9 +28,13 @@ class HybridRiskMonitor:
         if data_dir:
             hmm_path = os.path.join(data_dir, "hmm_model.pkl")
             lstm_path = os.path.join(data_dir, "lstm_autoencoder_state.pkl")
+            regime_path = os.path.join(data_dir, "institutional_regime.pkl")
             
             if os.path.exists(hmm_path):
                 self.hmm_model = joblib.load(hmm_path)
+            if os.path.exists(regime_path):
+                self.regime_detector = InstitutionalRegimeDetector()
+                self.regime_detector.load(regime_path)
             if os.path.exists(lstm_path):
                 # Placeholder para la carga segura si decidimos usar el método .load del modelo
                 pass
@@ -41,6 +51,16 @@ class HybridRiskMonitor:
         if is_crisis:
             return 0.5
         return 1.0
+
+    def diagnose_institutional_regime(
+        self, X_features: np.ndarray, recent_returns: np.ndarray
+    ) -> Optional[RegimeDiagnosis]:
+        """
+        Diagnostica el régimen con el modelo HMM 3-estados y el test KS de deriva (v2.0).
+        """
+        if self.regime_detector is None:
+            return None
+        return self.regime_detector.diagnose(X_features, recent_returns)
 
     def check_micro_anomaly(self, X_window: np.ndarray) -> bool:
         """
@@ -88,10 +108,12 @@ class RiskManager:
 
     def calculate_position_size(self, balance: float, current_price: float, stop_loss_price: float, 
                                 tick_size: float, tick_value: float, volume_step: float,
-                                prediction_prob: float = None, confidence_threshold: float = 0.5):
+                                prediction_prob: float = None, confidence_threshold: float = 0.5,
+                                regime_multiplier: float = 1.0):
         """
         Calcula el volumen exacto (en lotes) respetando el riesgo máximo de la cuenta.
         Soporta tanto Long (SL abajo del precio) como Short (SL arriba del precio).
+        :param regime_multiplier: Multiplicador de seguridad por régimen (HMM) y KS-Drift (ej. 0.25 para choppy).
         """
         if current_price == stop_loss_price:
             return 0.0
@@ -111,7 +133,7 @@ class RiskManager:
             else:
                 kelly_mult = 2.0
                 
-        dynamic_risk_pct = self.risk_per_trade_pct * kelly_mult
+        dynamic_risk_pct = self.risk_per_trade_pct * kelly_mult * max(0.0, float(regime_multiplier))
         risk_amount = balance * dynamic_risk_pct
         
         # Distancia al Stop Loss en precio (valor absoluto para soportar Long y Short)
