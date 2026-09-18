@@ -1,0 +1,7 @@
+# Production VPS Lean Requirements (< 130 MB RAM Footprint)
+MetaTrader5>=5.0.47
+numpy>=1.24.0
+pandas>=2.0.0
+onnxruntime>=1.16.0
+requests>=2.31.0
+python-dotenv>=1.0.0
