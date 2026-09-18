@@ -315,5 +315,14 @@ def run_training_pipeline():
         train_for_asset(activo)
     print("\n🎉 TODOS LOS ACTIVOS HAN SIDO PROCESADOS EXITOSAMENTE.")
 
+    # Sincronización automática de modelos ONNX (v2.0 MLOps)
+    try:
+        from models.export_champions_to_onnx import export_all_champions
+        print("\n🔄 [v2.0 MLOps] Sincronizando automáticamente modelos campeones a ONNX con firmas SHA-256...")
+        export_all_champions()
+        print("✅ [v2.0 MLOps] Modelos ONNX y manifiesto criptográfico sincronizados exitosamente.")
+    except Exception as onnx_err:
+        print(f"⚠️ [v2.0 MLOps] Sincronización ONNX omitida o en contingencia: {onnx_err}")
+
 if __name__ == "__main__":
     run_training_pipeline()

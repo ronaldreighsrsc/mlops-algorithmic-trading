@@ -382,13 +382,22 @@ python src/execution/main_bot_v2.py --mode gateway --interval 5.0
 python src/execution/main_bot_v2.py --mode daemon
 ```
 
-### 4. Exportar Modelos Campeones a ONNX con Manifiesto Criptográfico
+### 4. Zero-Touch MLOps: Compilación Automática a ONNX & Manifiesto Criptográfico
+
+> [!TIP]
+> **Recomendación Operacional Táctica para Reentrenamiento & Producción (Zero-Touch MLOps):**  
+> Para evitar desalineaciones en producción y garantizar cero errores humanos, **unificamos ambas responsabilidades en el pipeline principal**:  
+> Siempre que ejecutes el reentrenamiento periódico de modelos con `python src/main_training.py` o el torneo de asignación de portafolio con `python src/evaluation/portfolio_backtester.py`, el sistema **compila y exporta automáticamente** los modelos campeones a formato `.onnx` en `results/saved_models/` y refresca sus firmas criptográficas en `onnx_manifest.json`.
+>
+> De este modo, el flujo operativo heredado (*legacy*) no se altera y `execution_gateway.py` siempre arranca con las firmas criptográficas al día de forma 100% desatendida.
+
+Si deseas forzar una re-exportación o validación manual aislada sin reentrenar (p. ej. en un job de CI/CD o tras migrar un modelo entre servidores):
 ```bash
 python src/models/export_champions_to_onnx.py
 ```
-*Genera los archivos `.onnx` para cada activo en `results/saved_models/` y calcula el checksum SHA-256 en `onnx_manifest.json`.*
+*Actualiza los archivos `.onnx` en `results/saved_models/` y calcula los checksums SHA-256 en `onnx_manifest.json`.*
 
-### 5. Reproducción del Pipeline de Investigación (ETL, Optuna & Portafolio)
+### 5. Reproducción del Pipeline Completo de Investigación (ETL, Optuna & Portafolio)
 ```bash
 # 1. Extracción y screening nativo MT5 (Hurst > 0.55)
 python src/data_extractor.py
@@ -396,10 +405,12 @@ python src/data_extractor.py
 # 2. Preprocesamiento incremental (FFD + EGARCH + Triple Barrera)
 python src/main_preprocessing.py
 
-# 3. Retuning Bayesian con Optuna (Poda de hiperparámetros)
+# 3. Retuning Bayesiano con Optuna (Poda de hiperparámetros)
+#    -> Guarda modelos campeones y compila automáticamente a ONNX con firmas SHA-256
 python src/main_training.py
 
 # 4. Torneo de Portafolio Financiero y Asignación HRP
+#    -> Exporta hrp_weights.json y sincroniza los grafos ONNX para Producción
 python src/evaluation/portfolio_backtester.py
 ```
 

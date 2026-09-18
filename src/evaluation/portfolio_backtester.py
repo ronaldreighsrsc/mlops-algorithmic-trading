@@ -609,4 +609,19 @@ if __name__ == "__main__":
             json.dump(pesos_dict, f, indent=4)
         print(f"✅ Pesos ({modo_seleccion}) exportados a 'hrp_weights.json' para Producción.")
 
+        # Sincronización automática de modelos ONNX (v2.0 MLOps)
+        try:
+            from models.export_champions_to_onnx import export_all_champions
+            print("\n🔄 [v2.0 MLOps] Compilando automáticamente modelos campeones a ONNX con firmas SHA-256...")
+            export_all_champions()
+            print("✅ [v2.0 MLOps] Modelos ONNX y manifiesto criptográfico sincronizados con éxito.")
+        except Exception as onnx_err:
+            try:
+                from src.models.export_champions_to_onnx import export_all_champions
+                print("\n🔄 [v2.0 MLOps] Compilando automáticamente modelos campeones a ONNX con firmas SHA-256...")
+                export_all_champions()
+                print("✅ [v2.0 MLOps] Modelos ONNX y manifiesto criptográfico sincronizados con éxito.")
+            except Exception as inner_err:
+                print(f"⚠️ [v2.0 MLOps] Sincronización ONNX omitida o en contingencia: {inner_err}")
+
     simulate_global_portfolio(series_retornos=series_retornos, capital_inicial=CAPITAL)
