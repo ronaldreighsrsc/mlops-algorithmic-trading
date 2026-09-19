@@ -10,15 +10,19 @@ def create_production_zip(output_filename="bot_production.zip"):
     
     print("Preparando paquete de Produccion para AWS (Modo Inteligente)...")
     
-    # 1. Archivos base estrictamente necesarios
+    # 1. Archivos base estrictamente necesarios (v2.0)
     includes = [
         "src/**/*.py",             
         "data/raw/*.csv",
         "requirements.txt",        
+        "requirements/*.txt",
         ".env",                    
         "start_bot.bat",           
         "README.md",               
+        "pytest.ini",
         "results/hrp_weights.json", 
+        "results/saved_models/*.onnx",
+        "results/saved_models/onnx_manifest.json",
     ]
     
     # 2. Descubrir campeones y empacar TODO lo que necesitan

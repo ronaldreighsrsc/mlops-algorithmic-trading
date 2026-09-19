@@ -13,7 +13,7 @@
 ![Pytest](https://img.shields.io/badge/Tests-63%2F63_Passing_100%25-success?style=for-the-badge&logo=pytest)
 ![MLflow](https://img.shields.io/badge/MLflow-Model_Registry-0194e2?style=for-the-badge&logo=mlflow)
 
-Infraestructura de trading cuantitativo algorítmico automatizado de grado **Hedge Fund / Prop Trading Desk**, diseñada para operar de manera autónoma en **MetaTrader 5 (MT5)** y optimizada para el broker ECN **Darwinex**. El sistema transpone los principios de ingeniería de sistemas distribuidos y tolerancia a fallos bancarios ([`diseno_proyecto_fraud_risk_system_v2.md`](file:///c:/Users/ronal/nada/diseno_proyecto_fraud_risk_system_v2.md)) y de edge computing ([`diseno_mejoras_arquitectura_edge_resilience_v2.md`](file:///c:/Users/ronal/nada/diseno_mejoras_arquitectura_edge_resilience_v2.md)) hacia una arquitectura de ejecución de ultra-alta disponibilidad.
+Infraestructura de trading cuantitativo algorítmico automatizado de grado **Hedge Fund / Prop Trading Desk**, diseñada para operar de manera autónoma en **MetaTrader 5 (MT5)** y optimizada para el broker ECN **Darwinex**. El sistema transpone los principios de ingeniería de sistemas distribuidos, tolerancia a fallos bancarios y resiliencia edge hacia una arquitectura de ejecución de ultra-alta disponibilidad y baja latencia.
 
 ---
 
@@ -414,4 +414,105 @@ python src/main_training.py
 python src/evaluation/portfolio_backtester.py
 ```
 
+### 6. Empaquetado Inteligente para AWS / VPS (`export_to_aws.py`)
+Genera un bundle optimizado `bot_production.zip` que incluye exclusivamente los artefactos requeridos en vivo:
+```bash
+python export_to_aws.py
+```
+*Empaqueta los modelos campeones (`.onnx`, `.pkl`, `.keras`), monitores MLOps (`results/campeon_*_autoencoder/`, `results/campeon_*_hmm.pkl`), el manifiesto criptográfico `onnx_manifest.json`, los pesos de portafolio `hrp_weights.json`, el código fuente `src/`, el script de servicio `start_bot.bat` y los requerimientos de ejecución.*
+
 ---
+
+## ☁️ Despliegue y Automatización 24/7 en Servidor AWS / EC2 / Windows VPS
+
+Para que el bot opere de forma ininterrumpida y sobreviva a reinicios automáticos de instancias cloud o parches de seguridad de Windows Server, **es imperativo considerar la restricción gráfica de MetaTrader 5**:
+
+> [!WARNING]
+> **Restricción de Entorno GUI de MetaTrader 5:**  
+> MetaTrader 5 requiere inicializar subsistemas gráficos de Windows para interactuar con la API nativa de IPC. Por ello, **NO** debe lanzarse como un servicio silencioso de Windows ("Session 0 Isolation"), ya que crashearía de forma inmediata al no encontrar un contexto gráfico activo.
+
+Para configurar la ejecución automática e indestructible en una instancia **AWS EC2 (Windows Server)** o VPS dedicado:
+
+### Paso 1: Configurar Auto-Login en Windows Server
+1. Abre el Símbolo del Sistema (CMD) como **Administrador** y destraba la directiva de contraseñas de Windows:
+   ```cmd
+   reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device" /v DevicePasswordLessBuildVersion /t REG_DWORD /d 0 /f
+   ```
+2. Presiona `Win + R`, escribe `netplwiz` y pulsa Enter.
+3. Desmarca la casilla *"Los usuarios deben escribir su nombre y contraseña para usar el equipo"*.
+4. Haz clic en **Aplicar**, introduce la contraseña de `Administrator` dos veces y acepta.  
+   *(Con esto, el servidor iniciará sesión automáticamente en el escritorio al encender o reiniciar).*
+
+### Paso 2: Programar la Tarea con Privilegios Elevados (`schtasks`)
+Crea la tarea programada que ejecutará el script de arranque justo cuando el escritorio cargue:
+```cmd
+schtasks /create /tn "QuantBot_Trading" /tr "C:\Users\Administrator\Desktop\quant-trading-bot\start_bot.bat" /sc onlogon /ru "Administrator" /rl highest /f
+```
+
+### Script de Arranque Resiliente (`start_bot.bat`)
+El script incorpora una pausa inicial de 60 segundos para permitir que MetaTrader 5 y los servicios de red sincronicen su conexión con el broker antes de invocar el orquestador institucional en modo dual:
+```bat
+@echo off
+:: Script de arranque del QuantBot - AWS Production (v2.0 Dual Mode)
+title QuantBot v2.0 - Sistema de Trading Cuantitativo Institucional
+
+:: Esperar 60 segundos para que MetaTrader 5 termine de cargar al inicio
+timeout /t 60 /nobreak
+
+:: Activar el entorno virtual y arrancar el bot en modo dual
+cd /d C:\Users\Administrator\Desktop\quant-trading-bot
+call venv\Scripts\activate.bat
+python src\execution\main_bot_v2.py --mode dual --interval 5.0
+
+:: Si el bot muere, esperar 30 segundos y reiniciar automaticamente
+:restart
+echo Bot detenido. Reiniciando en 30 segundos...
+timeout /t 30 /nobreak
+python src\execution\main_bot_v2.py --mode dual --interval 5.0
+goto restart
+```
+
+---
+
+## 📅 Calendario de Mantenimiento MLOps Institucional
+
+Para asegurar una operación libre de drift y sin confusión de roles operativos, sigue esta cadencia recomendada:
+
+| Fase MLOps | Frecuencia Recomendada | Script a Ejecutar | Parámetro / Detalle Clave | Qué hace / Qué genera |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Refresco de Datos** | Mensual | `python src/data_extractor.py`<br>`python src/main_preprocessing.py` | N/A | Descarga velas MT5 recientes y actualiza matrices con FFD y EGARCH en `data/processed/*.csv`. |
+| **2. Reentrenamiento de Modelos** | Semestral / Anual | `python src/main_training.py` | N/A | Optimización Bayesiana Optuna. **Auto-compila a ONNX con firmas SHA-256 en `onnx_manifest.json` (Zero-Touch MLOps).** |
+| **3. Monitores MLOps & Torneo** | Semestral / Tras Paso 2 | `python src/evaluation/portfolio_backtester.py` | `fast_mode=False` (~1 h) | Entrena detectores HMM, Autoencoders de anomalías y sincroniza los grafos `.onnx` para producción. |
+| **4. Auditoría de Robustez PBO** | Trimestral / Tras Paso 2 | `python src/evaluation/cpcv_auditor.py` | N/A | Evalúa $\binom{6}{2}=15$ caminos combinatorios CPCV certificando $PBO < 5\%$. |
+| **5. Rebalanceo de Pesos HRP** | Mensual (ej. día 1) | `python src/evaluation/portfolio_backtester.py` | `fast_mode=True` (~2 min) | Recalcula la matriz HRP con Shrinkage Sharpe rodante y actualiza `results/hrp_weights.json`. |
+| **6. Empaquetado Producción** | Tras Paso 2 o 5 | `python export_to_aws.py` | N/A | Genera el bundle `bot_production.zip` listo para desplegar en la instancia AWS / VPS. |
+| **7. Operativa en Vivo 24/7** | Continua (Mercado Abierto) | `python src/execution/main_bot_v2.py --mode dual` | `--interval 5.0` | Ejecución en ultra-baja latencia (< 15 ms), Shadow Journal asíncrono y auditoría SQLite WAL. |
+
+---
+
+## 📓 Auditoría de Producción en Vivo & Dashboards
+
+### 1. Evaluador de Rendimiento en Vivo (`src/evaluation/live_evaluator.py`)
+Permite auditar el desempeño financiero real del bot en caliente sin depender exclusivamente de los reportes del broker:
+```bash
+python src/evaluation/live_evaluator.py
+```
+Genera un informe interactivo HTML en `results/live_production_report.html` con:
+- Equidad y Balance en tiempo real.
+- Retorno sobre la Inversión (ROI) y Sharpe Ratio en vivo.
+- Máximo Drawdown real vs. Drawdown proyectado por Monte Carlo.
+- Historial detallado de operaciones cerradas y tasa de acierto (Win Rate).
+
+### 2. Consultas Forenses en la Bóveda Transaccional (`results/trading_vault.db`)
+Gracias al modo SQLite Write-Ahead Logging (WAL), puedes consultar la base de datos en caliente sin bloquear la ejecución del bot:
+```bash
+sqlite3 results/trading_vault.db "SELECT timestamp_utc, symbol, signal_direction, expected_utility, estimated_friction, hurdle_ratio, status FROM execution_audit_log ORDER BY id DESC LIMIT 10;"
+```
+
+### 3. Dashboard MLflow (Experiment Tracking & Model Registry)
+Visualiza el historial completo de entrenamientos, torneos y métricas CPCV:
+```bash
+mlflow ui
+```
+Disponible en `http://127.0.0.1:5000` con tracking de parámetros de Optuna, curvas de aprendizaje, matrices de confusión y artefactos exportados.
+
