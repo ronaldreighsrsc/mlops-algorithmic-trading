@@ -17,21 +17,23 @@ Infraestructura de trading cuantitativo algorítmico automatizado de grado **Hed
 
 ---
 
-## 🏛️ La Trilogía de Misión Crítica Transversal
+## 🏛️ El Cuarteto de Misión Crítica Transversal (Los 4 Pilares)
 
-Existe una estricta simetría matemática y operacional entre los tres sistemas centrales del portafolio:
+Existe una estricta simetría matemática y operacional entre los cuatro sistemas centrales del portafolio:
 1. **Detección de Fraude Bancario (Banco Bci / CMF):** Autorizaciones síncronas en tiempo real (< 30 ms) vs. investigación forense y reportes ROS asíncronos.
-2. **Resiliencia IoT & Edge (OmniEdge Sentinel):** Decisión de handover de red (< 5 ms en RAM) vs. persistencia segura en memoria flash sin bloqueo.
+2. **Resiliencia IoT & Edge (OmniEdge Sentinel):** Decisión de handover de red (< 800 ms) vs. persistencia segura en memoria flash sin bloqueo.
 3. **Trading Cuantitativo (AlphaEdge Sentinel v2.0):** Envío de órdenes a mercado (< 15 ms) vs. reentrenamiento diario, Shadow Journal y análisis macroeconómico.
+4. **Mantenimiento Predictivo Industrial (CAEX Sentinel v2.0):** Ingesta streaming CAN bus (< 20 ms) con clasificación de mínimo riesgo de Bayes vs. RUL estocástico Weibull.
 
-| Dimensión de Ingeniería | Sistema Bancario (Bci / Fraude) | Sistema Edge IoT (OmniEdge) | Sistema Quant Bot (v2.0) |
-| :--- | :--- | :--- | :--- |
-| **1. Restricción Temporal (SLA)** | Switch Transaccional (< 30 ms) | Handover Wi-Fi (< 800 ms) | **Tick-to-Order MT5 (< 15 ms)** |
-| **2. Función de Pérdida / Costo** | Costo Asimétrico Ley 21.234 (40:1) | Penalización de Desconexión $C_{\text{switch}}$ | **Fricción Microestructural (Spread + Slippage + Swap)** |
-| **3. Restricción de Cómputo** | Microservicios Cloud / Container | Memoria Flash SD / RAM < 120 MB | **VPS Trading 1-2 GB RAM (< 130 MB, Zero OOM)** |
-| **4. Detección de Deriva (Drift)** | Population Stability Index (PSI) | Test Kolmogorov-Smirnov RF | **LSTM Autoencoder (P90/P99) + KS-Test 50 barras** |
-| **5. Agente Inteligente / Explicabilidad** | Agente ROS CMF (Tipologías UAF) | Agente RCA Falla Red (IEEE 802.11) | **Agente Macro-Forense Pre-News & RCA Post-Trade** |
-| **6. Persistencia y Caché** | Redis In-Memory + Delta Lake | Ring Buffer RAM + SQLite Batch | **Caching RAM + SQLite WAL In-Process (`TradeVault`)** |
+| Dimensión de Ingeniería | 1. Banca / Fraude (Bci) | 2. IoT Edge (OmniEdge) | 3. Quant Trading (AlphaEdge) | 4. Mining CBM (CAEX Sentinel) |
+| :--- | :--- | :--- | :--- | :--- |
+| **1. Restricción Temporal (SLA)** | Switch Transaccional (< 30 ms) | Handover Wi-Fi (< 800 ms) | **Tick-to-Order MT5 (< 15 ms)** | Ingesta CAN Streaming (< 20 ms) |
+| **2. Función de Pérdida / Costo** | Costo Asimétrico Ley 21.234 (40:1) | Penalización Desconexión $C_{\text{switch}}$ | **Fricción Microestructural (Spread + Slippage)** | Falla en Rampa vs. Parada Taller |
+| **3. Restricción de Cómputo** | Microservicios Cloud / Container | Flash SD Wear / RAM < 120 MB | **VPS Trading 1-2 GB RAM (< 130 MB, Zero OOM)** | Edge Gateway / Docker < 350 MB |
+| **4. Detección de Deriva (Drift)** | Population Stability Index (PSI) | Test Kolmogorov-Smirnov RF | **LSTM Autoencoder (P90/P99) + KS-Test 50 barras** | Kolmogorov-Smirnov Sensor Drift |
+| **5. Agente Inteligente / Explicabilidad** | Agente ROS CMF (Tipologías UAF) | Agente RCA Falla Red (IEEE 802.11) | **Agente Macro-Forense Pre-News & RCA Post-Trade** | Agente SAP PM / ISO 13374 RAG |
+| **6. Persistencia y Caché** | Redis In-Memory + Delta Lake | Ring Buffer RAM + SQLite Batch | **Caching RAM + SQLite WAL In-Process (`TradeVault`)** | Ring Buffer RAM + SQLite WAL |
+
 
 ---
 
@@ -515,4 +517,12 @@ Visualiza el historial completo de entrenamientos, torneos y métricas CPCV:
 mlflow ui
 ```
 Disponible en `http://127.0.0.1:5000` con tracking de parámetros de Optuna, curvas de aprendizaje, matrices de confusión y artefactos exportados.
+
+---
+
+## 📜 Licencia & Portafolio Institucional
+- **Autor:** Ronald Solares (Ingeniero Civil Industrial — Data, MLOps & Quantitative Systems).
+- **Licencia:** MIT License. Consulta [LICENSE](LICENSE) para más detalles.
+- **Suite de Misión Crítica (Los 4 Pilares):** Forma parte del marco integral de ingeniería junto con [Fraud Detection System (Bci)](https://github.com/ronaldreighsrsc/fraud-detection-system), [OmniEdge Sentinel](https://github.com/ronaldreighsrsc/edge-network-resilience-system) y [CAEX Predictive Maintenance](https://github.com/ronaldreighsrsc/predictive-maintenance-system).
+
 
