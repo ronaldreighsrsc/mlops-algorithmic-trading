@@ -79,18 +79,26 @@ class RiskManager:
     """
     Gestor de Riesgo y Position Sizing para el Bot Cuantitativo.
     """
-    def __init__(self, risk_per_trade_pct: float = 0.01, k_up: float = 2.0, k_down: float = 1.5, max_hold: int = 10):
+    def __init__(
+        self,
+        risk_per_trade_pct: float = 0.01,
+        k_up: float = 2.0,
+        k_down: float = 1.5,
+        max_hold: int = 10,
+        data_dir: Optional[str] = None,
+    ):
         """
         :param risk_per_trade_pct: Porcentaje del balance a arriesgar (ej. 0.01 = 1%)
         :param k_up: Multiplicador de volatilidad para el Take Profit
         :param k_down: Multiplicador de volatilidad para el Stop Loss
         :param max_hold: Maximo de velas a mantener el trade abierto
+        :param data_dir: Directorio de artefactos MLOps (HMM / InstitutionalRegimeDetector)
         """
         self.risk_per_trade_pct = risk_per_trade_pct
         self.k_up = k_up
         self.k_down = k_down
         self.max_hold = max_hold
-        self.hybrid_monitor = HybridRiskMonitor()
+        self.hybrid_monitor = HybridRiskMonitor(data_dir=data_dir)
 
     def calculate_triple_barrier_levels(self, current_price: float, egarch_vol: float):
         """

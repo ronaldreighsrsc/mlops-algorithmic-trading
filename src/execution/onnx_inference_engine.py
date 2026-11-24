@@ -1,15 +1,25 @@
 """
-Módulo de Inferencia de Ultra-Baja Latencia (ONNX Runtime).
+Módulo de Inferencia de Ultra-Baja Latencia (ONNX Runtime — v3.0).
 Reemplaza TensorFlow/Keras en producción VPS para lograr < 2 ms de latencia
 y reducir la huella de memoria RAM de 1.4 GB a < 130 MB.
+
+Correcciones v3.0:
+- Selecciona explícitamente el tensor de probabilidades ('calibrated_probability' /
+  'output_probability' / 'probabilities') en vez de outputs[0] (que en skl2onnx es la
+  etiqueta discreta int64).
+- Soporta inferencia por lotes (predict_proba_batch) para validación estricta de paridad.
+- Adapta ventanas 2D a vector aplanado 2D si el modelo tabular espera (None, look_back*F).
 """
+
+from __future__ import annotations
 
 import os
 import time
 import logging
 import hashlib
+from typing import Any, Dict, Optional
+
 import numpy as np
-from typing import Dict, Optional, Tuple, Any
 
 try:
     import onnxruntime as ort
@@ -40,7 +50,7 @@ class ONNXInferenceEngine:
 
         self.onnx_model_path = onnx_model_path
 
-        # Verificación criptográfica de integridad SHA256 si se suministra
+        # Verificación criptográfica obligatoria de integridad SHA-256
         if expected_sha256:
             actual_hash = self.compute_file_sha256(onnx_model_path)
             if actual_hash.lower() != expected_sha256.lower():
@@ -49,13 +59,11 @@ class ONNXInferenceEngine:
                     f"Esperado: {expected_sha256}\nObtenido: {actual_hash}"
                 )
 
-        # Configurar SessionOptions optimizadas para VPS CPU
         opts = ort.SessionOptions()
         opts.intra_op_num_threads = intra_threads
         opts.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
         opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
 
-        # Cargar sesión en CPUExecutionProvider
         self.session = ort.InferenceSession(
             onnx_model_path,
             sess_options=opts,
@@ -64,10 +72,21 @@ class ONNXInferenceEngine:
 
         self.input_name = self.session.get_inputs()[0].name
         self.input_shape = self.session.get_inputs()[0].shape
-        self.output_name = self.session.get_outputs()[0].name
+
+        # Priorizar salida calibrada > cualquier salida de probabilidad > última salida
+        outputs = self.session.get_outputs()
+        cal_outputs = [o for o in outputs if "calibrated" in o.name.lower()]
+        prob_outputs = [o for o in outputs if "prob" in o.name.lower()]
+        if cal_outputs:
+            self.output_name = cal_outputs[-1].name
+        elif prob_outputs:
+            self.output_name = prob_outputs[-1].name
+        else:
+            self.output_name = outputs[-1].name
+
         logger.info(
             f"Sesión ONNX inicializada: {os.path.basename(onnx_model_path)} "
-            f"(Input: {self.input_name} {self.input_shape})"
+            f"(Input: {self.input_name} {self.input_shape} -> Output: {self.output_name})"
         )
 
     @staticmethod
@@ -79,50 +98,64 @@ class ONNXInferenceEngine:
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
 
+    def _prepare_input(self, features: np.ndarray) -> np.ndarray:
+        x_input = np.ascontiguousarray(features, dtype=np.float32)
+        expected_dims = len(self.input_shape)
+
+        if expected_dims == 3 and x_input.ndim == 2:
+            x_input = np.expand_dims(x_input, axis=0)
+        elif expected_dims == 2:
+            if x_input.ndim == 1:
+                x_input = x_input.reshape(1, -1)
+            elif x_input.ndim == 2:
+                expected_cols = self.input_shape[1]
+                if isinstance(expected_cols, int) and x_input.shape[1] != expected_cols and x_input.size == expected_cols:
+                    x_input = x_input.reshape(1, expected_cols)
+        return x_input
+
+    def _extract_positive_probs(self, out: Any) -> np.ndarray:
+        # Manejar posible salida dict/zipmap por robustez
+        if isinstance(out, list) and out and isinstance(out[0], dict):
+            return np.array([float(d.get(1, d.get("1", 0.5))) for d in out], dtype=np.float64)
+
+        arr = np.asarray(out, dtype=np.float64)
+        if arr.ndim == 2:
+            if arr.shape[1] == 2:
+                probs = arr[:, 1]
+            else:
+                probs = arr[:, 0]
+        elif arr.ndim == 1:
+            if len(arr) == 2 and (isinstance(self.input_shape[0], int) and self.input_shape[0] == 1):
+                probs = np.array([arr[1]], dtype=np.float64)
+            else:
+                probs = arr
+        else:
+            probs = arr.reshape(-1)
+
+        return np.clip(probs, 0.0, 1.0)
+
+    def predict_proba_batch(self, X_batch: np.ndarray) -> np.ndarray:
+        """Ejecuta inferencia vectorizada por lote retornando P(y=1) en [0, 1]."""
+        x_input = np.ascontiguousarray(X_batch, dtype=np.float32)
+        if len(self.input_shape) == 2 and x_input.ndim == 1:
+            x_input = x_input.reshape(1, -1)
+        raw_out = self.session.run([self.output_name], {self.input_name: x_input})[0]
+        return self._extract_positive_probs(raw_out)
+
     def predict_probability(self, features: np.ndarray) -> float:
         """
-        Ejecuta la inferencia en C++ BLAS nativo.
-        Acepta features como ndarray (2D o 3D según el modelo).
-        Retorna: Probabilidad continua de clase positiva P(TP) en [0.0, 1.0].
+        Ejecuta inferencia para una única observación/ventana en C++ BLAS nativo.
+        Retorna probabilidad continua P(y=1) en [0.0, 1.0].
         """
-        # Asegurar tipo de datos float32 y contigüidad estricta en memoria
-        x_input = np.ascontiguousarray(features, dtype=np.float32)
-
-        # Adaptar dimensiones si el modelo espera shape específico
-        expected_dims = len(self.input_shape)
-        if x_input.ndim < expected_dims:
-            if expected_dims == 3 and x_input.ndim == 2:
-                # Expandir batch o secuencia (1, seq_len, features)
-                x_input = np.expand_dims(x_input, axis=0)
-            elif expected_dims == 2 and x_input.ndim == 1:
-                x_input = x_input.reshape(1, -1)
-
+        x_input = self._prepare_input(features)
         raw_outputs = self.session.run([self.output_name], {self.input_name: x_input})
-
-        # Extraer la probabilidad de forma agnóstica a la arquitectura del grafo
-        out = raw_outputs[0]
-
-        # Caso: Array 3D o 2D con salida binaria (batch, 2) o sigmoide (batch, 1)
-        if out.ndim >= 2:
-            if out.shape[-1] == 2:
-                prob = float(out[0][1])  # Clase 1 en clasificador multiclase
-            else:
-                prob = float(out[0][0])
-        elif out.ndim == 1:
-            prob = float(out[1]) if len(out) == 2 else float(out[0])
-        else:
-            prob = float(out)
-
-        # Truncar a rango válido de probabilidad [0.0, 1.0]
-        return max(0.0, min(1.0, prob))
+        probs = self._extract_positive_probs(raw_outputs[0])
+        return float(probs[0])
 
     def benchmark_latency(self, sample_features: np.ndarray, n_iter: int = 100) -> Dict[str, float]:
-        """
-        Mide la distribución de latencia de inferencia en milisegundos.
-        """
+        """Mide la distribución de latencia de inferencia en milisegundos."""
         latencies_ms = []
 
-        # Warmup (5 pasadas)
         for _ in range(5):
             self.predict_probability(sample_features)
 

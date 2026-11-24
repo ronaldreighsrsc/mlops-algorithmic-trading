@@ -14,6 +14,7 @@ Responsabilidades:
 
 import os
 import sys
+import json
 import time
 import logging
 from datetime import datetime, timezone
@@ -53,6 +54,7 @@ class ExecutionGateway:
         macro_guard: Optional[MacroHazardGuard] = None,
         calendar_provider: Optional[EconomicCalendarProvider] = None,
         gatekeeper: Optional[CostSensitiveGatekeeper] = None,
+        results_dir: Optional[str] = None,
     ):
         self.symbol = symbol
         self.timeframe = timeframe
@@ -61,7 +63,7 @@ class ExecutionGateway:
 
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.base_dir = base_dir
-        self.results_dir = os.path.join(base_dir, "results")
+        self.results_dir = results_dir or os.path.join(base_dir, "results")
         self.models_dir = os.path.join(self.results_dir, "saved_models")
 
         # Capa de base de datos y módulos v2.0
@@ -81,12 +83,14 @@ class ExecutionGateway:
         hrp_weights = self.vault.get_system_state("hrp_weights", {})
         self.hrp_weight = float(hrp_weights.get(self.symbol, 1.0)) if isinstance(hrp_weights, dict) else 1.0
 
-        base_risk = config.get("optimal_risk_pct", 0.025)
+        base_risk = config.get("optimal_risk_pct", config.get("risk", {}).get("optimal_risk_pct", 0.025))
+        barriers = config.get("barriers", {})
         self.risk_manager = RiskManager(
             risk_per_trade_pct=base_risk * self.hrp_weight,
-            k_up=config.get("k_up", 2.0),
-            k_down=config.get("k_down", 1.5),
-            max_hold=config.get("max_hold", 10),
+            k_up=barriers.get("k_up", config.get("k_up", 2.0)),
+            k_down=barriers.get("k_down", config.get("k_down", 1.5)),
+            max_hold=barriers.get("max_hold", config.get("max_hold", 10)),
+            data_dir=self.results_dir,
         )
         self.notifier = TelegramNotifier()
 
@@ -95,8 +99,9 @@ class ExecutionGateway:
         self.vol_mod = VolatilityModeler(window_size=500, target_col="close")
         self.ffd_eng = FractionalDifferencer(threshold=1e-4)
 
-        # Motor de Inferencia ONNX
+        # Motor de Inferencia ONNX (Fail-Closed en integridad criptográfica)
         self.onnx_engine: Optional[ONNXInferenceEngine] = None
+        self.model_integrity_error: Optional[str] = None
         self._init_inference_engine()
 
         self.last_bar_time = None
@@ -104,24 +109,42 @@ class ExecutionGateway:
         self.max_daily_loss_pct = config.get("max_daily_loss_pct", 0.025) # 2.5% Kill-switch
 
     def _init_inference_engine(self):
-        """Inicializa el motor ONNX si existe el modelo compilado."""
-        onnx_name = f"{self.config.get('model_file', '').replace('.pkl', '').replace('.keras', '')}.onnx"
+        """
+        Inicializa el motor ONNX con política Fail-Closed:
+        si el artefacto existe pero falla su firma SHA-256 o carga, registra
+        self.model_integrity_error y bloquea cualquier operativa.
+        """
+        meta_cfg = self.config.get("meta_model", {})
+        if isinstance(meta_cfg, dict) and meta_cfg.get("onnx_file"):
+            onnx_name = meta_cfg["onnx_file"]
+            expected_sha = meta_cfg.get("sha256")
+        else:
+            model_file = self.config.get("model_file", "")
+            onnx_name = f"{model_file.replace('.pkl', '').replace('.keras', '')}.onnx" if model_file else ""
+            expected_sha = None
+
+        if not onnx_name:
+            return
+
         onnx_path = os.path.join(self.models_dir, onnx_name)
 
         if os.path.exists(onnx_path):
             try:
-                # Leer checksum del manifiesto si existe
                 manifest_path = os.path.join(self.models_dir, "onnx_manifest.json")
-                expected_sha = None
-                if os.path.exists(manifest_path):
+                if expected_sha is None and os.path.exists(manifest_path):
                     with open(manifest_path, "r", encoding="utf-8") as f:
                         manifest = json.load(f)
                         expected_sha = manifest.get(onnx_name)
 
                 self.onnx_engine = ONNXInferenceEngine(onnx_path, expected_sha256=expected_sha)
-                logger.info(f"[{self.symbol}] Motor ONNX cargado exitosamente: {onnx_name}")
+                self.model_integrity_error = None
+                logger.info(f"[{self.symbol}] Motor ONNX cargado y verificado: {onnx_name}")
             except Exception as e:
-                logger.warning(f"[{self.symbol}] No se pudo inicializar ONNX: {e}")
+                self.onnx_engine = None
+                self.model_integrity_error = str(e)
+                logger.critical(
+                    f"[{self.symbol}] 🚨 FAIL-CLOSED ONNX: error cargando/validando {onnx_name}: {e}"
+                )
 
     def check_hard_risk_kill_switch(self) -> bool:
         """
@@ -215,36 +238,76 @@ class ExecutionGateway:
             )
             return {"status": "REJECTED_BY_MACRO", "reason": macro_reason}
 
-        # 6. Extracción y Preprocesamiento Rápido de Features
-        rates_hist = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 300)
+        # 5b. Política Fail-Closed ante corrupción o ausencia de modelo ONNX válido
+        if self.model_integrity_error is not None or self.onnx_engine is None:
+            reason_err = self.model_integrity_error or "Motor ONNX no inicializado (fail-closed, sin fallback 0.50)"
+            logger.critical(f"[{self.symbol}] 🚨 Abortando por integridad de modelo: {reason_err}")
+            self.vault.log_execution_audit(
+                symbol=self.symbol,
+                timeframe=str(self.timeframe),
+                signal_direction="CASH",
+                model_name=self.config.get("model_type", self.config.get("meta_model", {}).get("model_type", "UNKNOWN")),
+                prediction_prob=0.0,
+                hmm_regime_state=2,
+                autoencoder_mse=0.0,
+                expected_utility=0.0,
+                estimated_friction=0.0,
+                spread_points=0.0,
+                slippage_points=0.0,
+                swap_points=0.0,
+                hurdle_ratio=0.0,
+                kelly_multiplier=0.0,
+                lot_size=0.0,
+                entry_price=0.0,
+                tp_price=0.0,
+                sl_price=0.0,
+                status="MODEL_INTEGRITY_ERROR",
+                reason=reason_err,
+            )
+            return {
+                "status": "MODEL_INTEGRITY_ERROR",
+                "reason": reason_err,
+                "latency_ms": (time.perf_counter() - t_start) * 1000.0,
+            }
+
+        # 6. Extracción y Preprocesamiento Determinista de Features (Sin .bfill() ni refit FFD)
+        rates_hist = mt5.copy_rates_from_pos(self.symbol, self.timeframe, 0, 600)
         if rates_hist is None or len(rates_hist) < 50:
             return {"status": "INSUFFICIENT_HISTORY", "latency_ms": (time.perf_counter() - t_start) * 1000.0}
 
         df_raw = pd.DataFrame(rates_hist)
         df_proc = self.tech_eng.add_indicators(df_raw.copy())
         df_proc = self.vol_mod.compute_egarch(df_proc, symbol=self.symbol)
-        df_proc = self.ffd_eng.apply_ffd(df_proc)
-        df_proc.ffill(inplace=True)
-        df_proc.bfill(inplace=True)
 
-        feature_cols = self.config.get("features", [])
+        ffd_d_map = self.config.get("ffd_d_map")
+        if isinstance(ffd_d_map, dict) and ffd_d_map:
+            df_proc = self.ffd_eng.transform_with_fixed_d(df_proc, ffd_d_map)
+        else:
+            df_proc = self.ffd_eng.apply_ffd(df_proc)
+
+        # Imputación estrictamente causal (solo forward-fill + drop warmup, NUNCA bfill)
+        df_proc = df_proc.ffill().dropna()
+        if df_proc.empty:
+            return {"status": "INSUFFICIENT_HISTORY", "latency_ms": (time.perf_counter() - t_start) * 1000.0}
+
+        meta_cfg = self.config.get("meta_model", {})
+        feature_cols = meta_cfg.get("feature_order") or self.config.get("features", [])
         if not all(col in df_proc.columns for col in feature_cols):
             logger.error(f"[{self.symbol}] Faltan columnas de features en preprocesamiento.")
             return {"status": "FEATURE_ERROR"}
 
-        # 7. Inferencia ONNX de Ultra-Baja Latencia
+        # 7. Inferencia ONNX de Ultra-Baja Latencia (Scaler embebido en el grafo ONNX)
         sample_matrix = df_proc[feature_cols].values
-        look_back = self.config.get("look_back", 10)
-        if len(sample_matrix) < look_back:
-            return {"status": "NOT_ENOUGH_LOOKBACK"}
-
-        window_features = sample_matrix[-look_back:]
-
-        if self.onnx_engine is not None:
-            prob = self.onnx_engine.predict_probability(window_features)
+        is_v3_tabular = str(self.config.get("schema_version", "")).startswith("3.")
+        if is_v3_tabular:
+            window_features = sample_matrix[-1:]
         else:
-            # Fallback a heurística de predicción si ONNX no está exportado aún
-            prob = 0.50
+            look_back = self.config.get("look_back", 60)
+            if len(sample_matrix) < look_back:
+                return {"status": "NOT_ENOUGH_LOOKBACK"}
+            window_features = sample_matrix[-look_back:]
+
+        prob = self.onnx_engine.predict_probability(window_features)
 
         # 8. Evaluación de Regímenes y Deriva
         regime_state = 0

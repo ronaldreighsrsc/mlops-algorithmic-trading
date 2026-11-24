@@ -34,6 +34,7 @@ class AnalyticsDaemon:
         symbols_config: List[Dict],
         trade_vault: Optional[TradeVault] = None,
         shadow_interval_hours: float = 6.0,
+        results_dir: Optional[str] = None,
     ):
         self.symbols_config = symbols_config
         self.vault = trade_vault or TradeVault.get_instance()
@@ -42,7 +43,7 @@ class AnalyticsDaemon:
 
         base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
         self.base_dir = base_dir
-        self.results_dir = os.path.join(base_dir, "results")
+        self.results_dir = results_dir or os.path.join(base_dir, "results")
         self.models_dir = os.path.join(self.results_dir, "saved_models")
 
         self.last_shadow_run = 0.0
@@ -69,20 +70,46 @@ class AnalyticsDaemon:
             autoencoder = StrategyLSTMAutoencoder()
             autoencoder.load(autoencoder_base)
 
-            # Cargar retornos / métricas recientes guardadas en results/
+            # Cargar telemetría de 3 features [net_ret, trade_duration, win_flag]
+            metrics_file = os.path.join(self.results_dir, f"live_trade_metrics_{symbol}.json")
             returns_file = os.path.join(self.results_dir, f"live_returns_{symbol}.json")
-            if os.path.exists(returns_file):
-                with open(returns_file, "r") as f:
-                    rets = json.load(f)
-            else:
-                rets = cfg.get("oos_returns", [])
 
-            if len(rets) < 30:
-                logger.info(f"[{symbol}] Historial insuficiente para check de drift ({len(rets)} trades).")
+            raw_rows = None
+            if os.path.exists(metrics_file):
+                with open(metrics_file, "r", encoding="utf-8") as f:
+                    raw_rows = json.load(f)
+            elif "oos_trade_metrics" in cfg:
+                raw_rows = cfg["oos_trade_metrics"]
+            elif os.path.exists(returns_file):
+                with open(returns_file, "r", encoding="utf-8") as f:
+                    raw_rows = json.load(f)
+            else:
+                raw_rows = cfg.get("oos_returns", [])
+
+            if not raw_rows or len(raw_rows) < 10:
+                logger.info(f"[{symbol}] Historial insuficiente para check de drift ({len(raw_rows or [])} trades).")
                 return True
 
+            arr = np.asarray(raw_rows, dtype=np.float64)
+            expected_n_feat = int(getattr(autoencoder.scaler, "n_features_in_", 3))
+
+            # Convertir vector 1D de retornos a telemetría de 3 features si el autoencoder espera 3
+            if arr.ndim == 1:
+                if expected_n_feat == 3:
+                    win_flags = (arr > 0.0).astype(np.float64)
+                    durations = np.ones_like(arr, dtype=np.float64)
+                    arr = np.column_stack([arr, durations, win_flags])
+                else:
+                    arr = arr.reshape(-1, 1)
+
+            if arr.ndim != 2 or arr.shape[1] != expected_n_feat:
+                raise ValueError(
+                    f"Incompatibilidad de dimensiones en Autoencoder para {symbol}: "
+                    f"esperado (N, {expected_n_feat}), recibido {arr.shape}."
+                )
+
             # Evaluar últimas 30 métricas contra umbrales P90 y P99
-            recent_sample = np.array(rets[-30:]).reshape(-1, 1)
+            recent_sample = arr[-30:]
             is_anomalous = autoencoder.is_anomalous(recent_sample[-1])
             is_concept_drift = autoencoder.check_concept_drift(recent_sample)
 
