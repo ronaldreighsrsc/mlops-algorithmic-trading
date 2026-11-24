@@ -291,23 +291,70 @@ class ExecutionGateway:
             return {"status": "INSUFFICIENT_HISTORY", "latency_ms": (time.perf_counter() - t_start) * 1000.0}
 
         meta_cfg = self.config.get("meta_model", {})
-        feature_cols = meta_cfg.get("feature_order") or self.config.get("features", [])
-        if not all(col in df_proc.columns for col in feature_cols):
-            logger.error(f"[{self.symbol}] Faltan columnas de features en preprocesamiento.")
-            return {"status": "FEATURE_ERROR"}
-
-        # 7. Inferencia ONNX de Ultra-Baja Latencia (Scaler embebido en el grafo ONNX)
-        sample_matrix = df_proc[feature_cols].values
         is_v3_tabular = str(self.config.get("schema_version", "")).startswith("3.")
+
+        primary_side = 0
         if is_v3_tabular:
-            window_features = sample_matrix[-1:]
+            # Capa 0 (CUSUM) + Capa 1 (Modelo Primario) + Features Tabulares Multi-Escala
+            from src.preprocessing.cusum_filter import SymmetricCUSUMFilter
+            from src.preprocessing.tabular_features import build_meta_feature_matrix
+            from src.strategies.primary_strategies import get_primary_strategy
+
+            prim_cfg = self.config.get("primary_strategy", {})
+            prim_strategy = get_primary_strategy(
+                prim_cfg.get("name", "TrendPullbackPrimary"),
+                **prim_cfg.get("params", {}),
+            )
+            sides_series = prim_strategy.generate_sides(df_proc)
+            primary_side = int(sides_series.iloc[-1])
+
+            cusum_cfg = self.config.get("cusum_config")
+            bars_since_arr = None
+            if isinstance(cusum_cfg, dict) and cusum_cfg.get("kappa"):
+                cusum = SymmetricCUSUMFilter(
+                    kappa=float(cusum_cfg["kappa"]),
+                    vol_col=cusum_cfg.get("vol_col", "EGARCH_Vol"),
+                )
+                cusum_res = cusum.filter_events(df_proc)
+                bars_since_arr = np.zeros(len(df_proc), dtype=np.float64)
+                for pos, delta_b in zip(cusum_res.event_positions, cusum_res.bars_since_last):
+                    bars_since_arr[pos] = float(delta_b)
+                last_idx = len(df_proc) - 1
+                is_cusum_trigger = len(cusum_res.event_positions) > 0 and int(cusum_res.event_positions[-1]) == last_idx
+                if not is_cusum_trigger:
+                    primary_side = 0
+
+            if primary_side == 0:
+                return {
+                    "status": "NO_PRIMARY_EVENT",
+                    "latency_ms": (time.perf_counter() - t_start) * 1000.0,
+                }
+
+            feat_df = build_meta_feature_matrix(
+                df_proc,
+                primary_sides=sides_series,
+                bars_since_cusum=bars_since_arr,
+            )
+            feature_cols = meta_cfg.get("feature_order", list(feat_df.columns))
+            if not all(col in feat_df.columns for col in feature_cols):
+                logger.error(f"[{self.symbol}] Faltan columnas de features v3.0.")
+                return {"status": "FEATURE_ERROR"}
+
+            window_features = feat_df[feature_cols].iloc[-1:].values
+            prob = self.onnx_engine.predict_probability(window_features)
         else:
+            feature_cols = meta_cfg.get("feature_order") or self.config.get("features", [])
+            if not all(col in df_proc.columns for col in feature_cols):
+                logger.error(f"[{self.symbol}] Faltan columnas de features en preprocesamiento.")
+                return {"status": "FEATURE_ERROR"}
+
+            # 7. Inferencia ONNX de Ultra-Baja Latencia (Scaler embebido en el grafo ONNX)
+            sample_matrix = df_proc[feature_cols].values
             look_back = self.config.get("look_back", 60)
             if len(sample_matrix) < look_back:
                 return {"status": "NOT_ENOUGH_LOOKBACK"}
             window_features = sample_matrix[-look_back:]
-
-        prob = self.onnx_engine.predict_probability(window_features)
+            prob = self.onnx_engine.predict_probability(window_features)
 
         # 8. Evaluación de Regímenes y Deriva
         regime_state = 0
@@ -325,9 +372,15 @@ class ExecutionGateway:
             regime_kelly = diagnosis.effective_kelly_factor
 
         # 9. Determinación de Dirección
-        confidence_threshold = self.config.get("confidence_threshold", 0.50)
-        is_long = prob > confidence_threshold
-        is_short = self.config.get("bilateral", False) and (prob < (1.0 - confidence_threshold))
+        if is_v3_tabular:
+            # En v3.0 el Modelo Primario define el lado; el Meta-Modelo SOLO filtra por p̂ >= umbral
+            confidence_threshold = float(meta_cfg.get("analytical_prob_threshold", 0.50))
+            is_long = (primary_side == 1) and (prob >= confidence_threshold)
+            is_short = (primary_side == -1) and (prob >= confidence_threshold)
+        else:
+            confidence_threshold = self.config.get("confidence_threshold", 0.50)
+            is_long = prob > confidence_threshold
+            is_short = self.config.get("bilateral", False) and (prob < (1.0 - confidence_threshold))
 
         if not is_long and not is_short:
             logger.info(f"[{self.symbol}] Sin señal clara (Prob: {prob:.2%}).")
@@ -381,8 +434,10 @@ class ExecutionGateway:
             target_sl_pts = abs(sl_price - current_price) / sym_info["tick_size"]
 
         # 11. Filtro Sensible al Costo (Cost-Sensitive Gatekeeper)
+        # En v3.0 `prob` ya es P(TP | side, X) para ambos lados sin invertir 1 - prob
+        p_tp_directional = prob if (is_v3_tabular or is_long) else (1.0 - prob)
         decision = self.gatekeeper.evaluate_trade_utility(
-            predicted_p_tp=prob if is_long else (1.0 - prob),
+            predicted_p_tp=p_tp_directional,
             target_tp_points=target_tp_pts,
             target_sl_points=target_sl_pts,
             current_spread_points=spread_points,

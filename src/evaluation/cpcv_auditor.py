@@ -4,6 +4,7 @@ import itertools
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
+from scipy.stats import norm, skew, kurtosis
 import mlflow
 
 # Agregar la carpeta src al PYTHONPATH
@@ -184,6 +185,186 @@ class CPCVAuditor:
         plt.savefig(plot_path, dpi=300, bbox_inches='tight')
         plt.close()
         return plot_path
+
+    @staticmethod
+    def compute_deflated_sharpe_ratio(
+        returns: np.ndarray,
+        n_trials: int = 1,
+        trial_sharpes: np.ndarray | None = None,
+        annualization: float = 252.0,
+    ) -> dict:
+        """
+        Deflated Sharpe Ratio (DSR) formal de Bailey & López de Prado (2014).
+        Usa la varianza EMPÍRICA real de los Sharpe Ratios del torneo (sin hardcodeo 0.5).
+        """
+        r = np.asarray(returns, dtype=np.float64)
+        r = r[np.isfinite(r)]
+        n = len(r)
+        if n < 5:
+            return {"sharpe_obs": 0.0, "sr0_null": 0.0, "dsr": 0.0, "psr": 0.0, "skew": 0.0, "kurtosis": 3.0}
+
+        std = float(np.std(r, ddof=1))
+        if std <= 1e-12:
+            return {"sharpe_obs": 0.0, "sr0_null": 0.0, "dsr": 0.0, "psr": 0.0, "skew": 0.0, "kurtosis": 3.0}
+
+        sr_non_ann = float(np.mean(r) / std)
+        sr_ann = sr_non_ann * float(np.sqrt(annualization))
+        sk = float(skew(r))
+        # Curtosis total (normal = 3.0) como exige eq. (5) de Bailey & López de Prado
+        ku = float(kurtosis(r, fisher=False))
+
+        # Varianza del estimador de Sharpe por observación
+        sr_var = (1.0 - sk * sr_non_ann + ((ku - 1.0) / 4.0) * (sr_non_ann ** 2)) / max(1, n - 1)
+        sigma_sr = float(np.sqrt(max(sr_var, 1e-12)))
+
+        psr = float(norm.cdf(sr_non_ann / sigma_sr))
+
+        # Umbral nulo por Multiple Testing (N ensayos)
+        eff_n = max(1, int(n_trials))
+        if eff_n <= 1:
+            sr0_non_ann = 0.0
+        else:
+            euler_gamma = 0.5772156649
+            z_max = (1.0 - euler_gamma) * norm.ppf(1.0 - 1.0 / eff_n) + euler_gamma * norm.ppf(
+                1.0 - (1.0 / eff_n) * np.exp(-1.0)
+            )
+            if trial_sharpes is not None and len(trial_sharpes) >= 2:
+                ts_arr = np.asarray(trial_sharpes, dtype=np.float64)
+                ts_arr = ts_arr[np.isfinite(ts_arr)]
+                std_trials = float(np.std(ts_arr, ddof=1)) if len(ts_arr) >= 2 else sigma_sr
+            else:
+                std_trials = sigma_sr
+            sr0_non_ann = std_trials * float(z_max)
+
+        dsr = float(norm.cdf((sr_non_ann - sr0_non_ann) / sigma_sr))
+        return {
+            "sharpe_obs": sr_ann,
+            "sr_non_ann": sr_non_ann,
+            "sr0_null": sr0_non_ann * float(np.sqrt(annualization)),
+            "dsr": dsr,
+            "psr": psr,
+            "skew": sk,
+            "kurtosis": ku,
+        }
+
+    def audit_cscv_pbo(
+        self,
+        strategy_returns_matrix: np.ndarray | pd.DataFrame,
+        n_blocks: int = 10,
+        purge_bars: int = 10,
+        max_combinations: int = 252,
+    ) -> dict:
+        """
+        Implementación formal del algoritmo CSCV (Combinatorially Symmetric Cross-Validation)
+        para calcular la Probabilidad de Sobreajuste de Backtest (PBO — Bailey et al. 2014).
+
+        :param strategy_returns_matrix: Matriz T x N donde cada columna es la serie de
+                                        retornos netos de una estrategia candidata del torneo.
+        :param n_blocks: Número par S de bloques temporales contiguos (ej. 8 o 10).
+        :param purge_bars: Barras purgadas en las fronteras entre bloques IS y OOS.
+        """
+        M = np.asarray(strategy_returns_matrix, dtype=np.float64)
+        if M.ndim != 2:
+            raise ValueError("strategy_returns_matrix debe ser una matriz 2D (T x N).")
+
+        T, N = M.shape
+        if N < 2:
+            raise ValueError("El PBO formal CSCV requiere al menos N >= 2 estrategias competidoras.")
+        if n_blocks % 2 != 0 or n_blocks < 4:
+            raise ValueError("n_blocks debe ser un entero par >= 4.")
+        if T < n_blocks * 10:
+            return {
+                "pbo": 1.0,
+                "median_logit": -1.0,
+                "prob_oos_loss": 1.0,
+                "mean_is_sharpe": 0.0,
+                "mean_oos_sharpe": 0.0,
+                "degradation_slope": 0.0,
+                "n_combinations": 0,
+                "n_strategies": N,
+            }
+
+        block_size = T // n_blocks
+        blocks = [(b * block_size, (b + 1) * block_size if b < n_blocks - 1 else T) for b in range(n_blocks)]
+
+        all_combos = list(itertools.combinations(range(n_blocks), n_blocks // 2))
+        if len(all_combos) > max_combinations:
+            rng = np.random.default_rng(42)
+            sel = rng.choice(len(all_combos), size=max_combinations, replace=False)
+            combos = [all_combos[idx] for idx in sorted(sel)]
+        else:
+            combos = all_combos
+
+        logits = []
+        is_best_sharpes = []
+        oos_selected_sharpes = []
+
+        for is_block_ids in combos:
+            is_set = set(is_block_ids)
+            oos_block_ids = [b for b in range(n_blocks) if b not in is_set]
+
+            is_idx = []
+            for b in is_block_ids:
+                s, e = blocks[b]
+                if (b - 1) in oos_block_ids:
+                    s += purge_bars
+                if (b + 1) in oos_block_ids:
+                    e -= purge_bars
+                if s < e:
+                    is_idx.extend(range(s, e))
+
+            oos_idx = []
+            for b in oos_block_ids:
+                s, e = blocks[b]
+                oos_idx.extend(range(s, e))
+
+            if len(is_idx) < 10 or len(oos_idx) < 10:
+                continue
+
+            M_is = M[is_idx, :]
+            M_oos = M[oos_idx, :]
+
+            # Sharpe por columna en IS y OOS
+            is_std = np.std(M_is, axis=0, ddof=1)
+            is_sr = np.where(is_std > 1e-12, np.mean(M_is, axis=0) / is_std * np.sqrt(252.0), -1e9)
+
+            oos_std = np.std(M_oos, axis=0, ddof=1)
+            oos_sr = np.where(oos_std > 1e-12, np.mean(M_oos, axis=0) / oos_std * np.sqrt(252.0), 0.0)
+
+            n_star = int(np.argmax(is_sr))
+            sr_is_star = float(is_sr[n_star])
+            sr_oos_star = float(oos_sr[n_star])
+
+            # Rango relativo en OOS: rank ∈ [1, N] -> omega_bar = rank / (N + 1) ∈ (0, 1)
+            # Empates resueltos por rango medio (rankdata)
+            oos_ranks = pd.Series(oos_sr).rank(method="average").values
+            omega_bar = float(np.clip(oos_ranks[n_star] / (N + 1.0), 1e-6, 1.0 - 1e-6))
+            lam = float(np.log(omega_bar / (1.0 - omega_bar)))
+
+            logits.append(lam)
+            is_best_sharpes.append(sr_is_star)
+            oos_selected_sharpes.append(sr_oos_star)
+
+        logits_arr = np.asarray(logits, dtype=np.float64)
+        is_arr = np.asarray(is_best_sharpes, dtype=np.float64)
+        oos_arr = np.asarray(oos_selected_sharpes, dtype=np.float64)
+
+        pbo = float(np.mean(logits_arr < 0.0)) if len(logits_arr) > 0 else 1.0
+        prob_oos_loss = float(np.mean(oos_arr <= 0.0)) if len(oos_arr) > 0 else 1.0
+        slope = 0.0
+        if len(is_arr) >= 2 and np.std(is_arr) > 1e-12:
+            slope = float(np.polyfit(is_arr, oos_arr, 1)[0])
+
+        return {
+            "pbo": pbo,
+            "median_logit": float(np.median(logits_arr)) if len(logits_arr) > 0 else 0.0,
+            "prob_oos_loss": prob_oos_loss,
+            "mean_is_sharpe": float(np.mean(is_arr)) if len(is_arr) > 0 else 0.0,
+            "mean_oos_sharpe": float(np.mean(oos_arr)) if len(oos_arr) > 0 else 0.0,
+            "degradation_slope": slope,
+            "n_combinations": len(logits_arr),
+            "n_strategies": N,
+        }
 
 
 if __name__ == "__main__":
