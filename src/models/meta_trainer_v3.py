@@ -116,7 +116,6 @@ class MetaModelTrainerV3:
             ]),
             "XGBOOST": lambda: Pipeline([
                 ("imputer", SimpleImputer(strategy="median")),
-                ("scaler", StandardScaler()),
                 ("clf", xgb.XGBClassifier(
                     n_estimators=120,
                     max_depth=3,
@@ -133,7 +132,6 @@ class MetaModelTrainerV3:
             ]),
             "LIGHTGBM": lambda: Pipeline([
                 ("imputer", SimpleImputer(strategy="median")),
-                ("scaler", StandardScaler()),
                 ("clf", lgb.LGBMClassifier(
                     n_estimators=120,
                     num_leaves=15,
@@ -151,7 +149,6 @@ class MetaModelTrainerV3:
             ]),
             "RANDOM_FOREST": lambda: Pipeline([
                 ("imputer", SimpleImputer(strategy="median")),
-                ("scaler", StandardScaler()),
                 ("clf", RandomForestClassifier(
                     n_estimators=150,
                     max_depth=5,

@@ -1,19 +1,45 @@
 # 📈 Autonomous Institutional Quantitative Trading Infrastructure
-## AlphaEdge Sentinel v2.0 — MetaTrader 5 & Darwinex Enterprise Edition
-### Marcos López de Prado Framework | MLOps Drift & Regime Governance | Ultra-Low Latency (< 15 ms)
+## AlphaEdge Sentinel v3.0 — MetaTrader 5 & Darwinex Enterprise Edition
+### 4-Layer AFML Architecture (CUSUM → Primary → Calibrated Meta-ML → Risk Overlays) | Real ONNX (< 1e-5 Parity) | CSCV PBO & Empirical DSR
 
 ![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
 ![MetaTrader5](https://img.shields.io/badge/MetaTrader_5-Native_Bridge-green?style=for-the-badge)
-![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-C++_BLAS_<1.8ms-005ced?style=for-the-badge&logo=onnx)
+![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-Real_Parity_<1e--5-005ced?style=for-the-badge&logo=onnx)
 ![VPS Footprint](https://img.shields.io/badge/VPS_RAM-<130MB_Zero_OOM-brightgreen?style=for-the-badge)
-![Validation](https://img.shields.io/badge/CPCV-PBO_<5%25-orange?style=for-the-badge)
-![Theory](https://img.shields.io/badge/López_de_Prado-FFD_&_HRP-purple?style=for-the-badge)
+![Validation](https://img.shields.io/badge/CSCV_PBO-Empirical_DSR-orange?style=for-the-badge)
+![Theory](https://img.shields.io/badge/AFML-CUSUM_MetaLabel_FFD_HRP-purple?style=for-the-badge)
 ![Persistence](https://img.shields.io/badge/SQLite_WAL-ACID_In--Process-003B57?style=for-the-badge&logo=sqlite)
 ![Regimes](https://img.shields.io/badge/HMM_3--State-Bull_Bear_Choppy-red?style=for-the-badge)
-![Pytest](https://img.shields.io/badge/Tests-63%2F63_Passing_100%25-success?style=for-the-badge&logo=pytest)
+![Pytest](https://img.shields.io/badge/Tests-92%2F92_Passing_100%25-success?style=for-the-badge&logo=pytest)
 ![MLflow](https://img.shields.io/badge/MLflow-Model_Registry-0194e2?style=for-the-badge&logo=mlflow)
 
-Infraestructura de trading cuantitativo algorítmico automatizado de grado **Hedge Fund / Prop Trading Desk**, diseñada para operar de manera autónoma en **MetaTrader 5 (MT5)** y optimizada para el broker ECN **Darwinex**. El sistema implementa una arquitectura de ejecución de ultra-alta disponibilidad y baja latencia (< 15 ms).
+Infraestructura de trading cuantitativo algorítmico de grado **Hedge Fund / Prop Trading Desk**, diseñada para operar de manera autónoma en **MetaTrader 5 (MT5)** y optimizada para el broker ECN **Darwinex**. Combina una arquitectura de ejecución desacoplada de ultra-baja latencia (< 15 ms, **v2.0**) con la refactorización metodológica completa de *Advances in Financial Machine Learning* (**v3.0**, especificación técnica en [`docs/SPEC_QUANT_V3_INSTITUTIONAL_ALPHA.md`](docs/SPEC_QUANT_V3_INSTITUTIONAL_ALPHA.md)).
+
+---
+
+## 🧠 Evolución Metodológica v3.0 — Las 4 Capas Cuantitativas Ortogonales (AFML)
+
+Para eliminar fugas temporales, sobreparametrización de redes neuronales sobre Time Bars y *backtest overfitting*, la **v3.0** separa estrictamente el sistema en cuatro capas independientes:
+
+1. **Capa 0 — Muestreo de Información (`src/preprocessing/cusum_filter.py`, `information_bars.py`):**
+   - En **D1:** **Filtro CUSUM Simétrico** dinámico calibrado por volatilidad EGARCH ($\sigma_{t-1}$) para muestrear solo desplazamientos estructurales.
+   - En **Intradía (MT5 OTC):** **Tick Bars** y **Tick Imbalance Bars (TIBs)** desde flujo de ticks, reduciendo la curtosis excesiva frente a Time Bars con sonrisa de volumen intradía.
+   - Screening con **Exponente de Hurst sobre retornos estacionarios** + **Variance Ratio Test** heterocedástico de Lo-MacKinlay (`asset_screener.py`).
+2. **Capa 1 — Modelo Primario Económico (`src/strategies/primary_strategies.py`):**
+   - Estrategias causales transparentes de alto Recall (`TrendPullbackPrimary`, `DonchianBreakoutPrimary`, `VolatilityMeanReversionPrimary`) que proponen únicamente el lado `side ∈ {-1, 0, +1}` (cero redes neuronales).
+3. **Capa 2 — Meta-Modelo Tabular Calibrado (`src/models/meta_trainer_v3.py`, `meta_labeling.py`, `sample_weights.py`):**
+   - **`MetaBarrierLabeler`:** Triple Barrera orientada simétricamente por `side` con entrada causal en `Open[t+1]`, descuento de fricción real e intervalos exactos `[t0, t1]`.
+   - **Sample Uniqueness (AFML Cap. 4):** Concurrencia $c_t$, unicidad media $\bar{u}_i$, atribución por retorno y time-decay.
+   - **Features Multi-Escala & Poda MDA OOS (`tabular_features.py`, `feature_importance.py`):** 15–22 features causales (sin aplanado de 480 columnas ni `.bfill()`), podadas por **MDA Purgado** (`PurgedKFold([t0, t1])`).
+   - **Torneo Tabular + Calibración Purgada (`calibration.py`):** `LogisticRegression L2`, `XGBoost`, `LightGBM` y `RandomForest` (`max_samples = avg_uniqueness`), optimizando **Log-Loss** + **PurgedPlattCalibrator** sobre OOF purgado (cero OOS threshold snooping; umbral económico analítico).
+   - **Gobernanza Anti-Overfitting (`cpcv_auditor.py`):** **Deflated Sharpe Ratio (DSR)** con varianza empírica de los ensayos del torneo y **CSCV PBO formal** sobre la matriz $T \times N$ de estrategias (Bailey & López de Prado, 2014).
+4. **Capa 3 — Ejecución Real ONNX & Risk Overlays (`execution_gateway.py`, `analytics_daemon.py`, `onnx_exporter.py`):**
+   - Exportación **ONNX real autocontenida** (`SimpleImputer` + `StandardScaler` + Clasificador + nodos Platt) con compuerta obligatoria de **paridad numérica `< 1e-5`** (verificada en ~`1e-7`) y **política Fail-Closed** ante checksum SHA-256 inválido.
+   - `ffd_d_map` congelado en `campeon_{symbol}_v3.json` (paridad estricta Train/Serve), `CostSensitiveGatekeeper` ($E[U] \ge 2.5\times$ fricción), HMM 3-estados + KS-Drift, `MacroHazardGuard`, Autoencoder P90/P99 sobre telemetría `(N, 3)` y `TradeVault` SQLite WAL.
+
+> [!NOTE]
+> **Hallazgo Empírico Honesto (Auditoría Real v3.0 sobre D1 OHLCV):**  
+> Al correr `python src/main_training_v3.py` sin leakage temporal ni *threshold snooping* sobre `EURUSD`, `Oro` y `SP500`, el pipeline exportó los modelos calibrados con paridad ONNX `< 2e-7` (`ECE = 0.028–0.083`), pero el auditor **CSCV PBO formal** reportó `PBO = 50%–86%` y `LogLoss ≈ 0.69` (`Brier ≈ 0.25`) — demostrando empíricamente que las features OHLCV/técnicas diarias por sí solas no producen alpha suficiente para superar las compuertas institucionales de capital real sin incorporar fuentes de señal alternativas o microestructura. Ese rechazo automático es precisamente la función de un auditor cuantitativo serio.
 
 ---
 
@@ -387,8 +413,10 @@ python src/data_extractor.py
 # 2. Preprocesamiento incremental (FFD + EGARCH + Triple Barrera)
 python src/main_preprocessing.py
 
-# 3. Retuning Bayesiano con Optuna (Poda de hiperparámetros)
-#    -> Guarda modelos campeones y compila automáticamente a ONNX con firmas SHA-256
+# 3. Entrenamiento Meta-Labeling Institucional v3.0 (CUSUM + Modelo Primario + MDA + Platt + CSCV PBO + ONNX Real < 1e-5)
+python src/main_training_v3.py
+
+# (Opcional) Pipeline legacy multi-arquitectura + Optuna
 python src/main_training.py
 
 # 4. Torneo de Portafolio Financiero y Asignación HRP
