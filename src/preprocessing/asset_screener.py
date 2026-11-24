@@ -22,47 +22,104 @@ class AssetScreener:
         os.makedirs(self.results_dir, exist_ok=True)
 
     @staticmethod
-    def calculate_hurst_exponent(series: pd.Series, max_lag: int = 100) -> float:
+    def calculate_hurst_exponent(series: pd.Series, max_lag: int = 100, is_returns: bool = False) -> float:
         """
-        Calcula el Exponente de Hurst (H) usando Rescaled Range (R/S Analysis Mandelbrot).
-        - H > 0.55: Tendencia persistente (alta memoria, ideal para ML)
-        - H ~ 0.50: Caminata aleatoria (ruido blanco puro, descartar)
-        - H < 0.45: Reversión a la media (Mean-reverting)
+        Calcula el Exponente de Hurst (H) vía Rescaled Range (R/S Analysis de Mandelbrot)
+        ESTRICTAMENTE sobre retornos logarítmicos estacionarios (v3.0).
+
+        Corrección crítica v3.0: aplicar R/S sobre precios crudos I(1) inflaba
+        artificialmente H hacia ~0.85 incluso en un paseo aleatorio puro.
+        - H > 0.55: Retornos persistentes (memoria tendencial real)
+        - H ~ 0.50: Caminata aleatoria (ruido blanco puro)
+        - H < 0.45: Reversión a la media (anti-persistente)
         """
-        ts = series.values
+        raw = pd.Series(series).dropna().astype(float).values
+        if is_returns:
+            ts = raw
+        else:
+            if np.any(raw <= 0):
+                ts = np.diff(raw)
+            else:
+                ts = np.diff(np.log(raw))
+
         if len(ts) < max_lag * 2:
+            max_lag = max(20, len(ts) // 3)
+        if len(ts) < 40:
             return 0.50
-            
+
         try:
             rs_list = []
             lags = []
             for k in range(10, max_lag, 5):
                 n_chunks = len(ts) // k
-                if n_chunks < 2: 
+                if n_chunks < 2:
                     break
                 rs_k = []
                 for i in range(n_chunks):
-                    chunk = ts[i*k:(i+1)*k]
+                    chunk = ts[i * k : (i + 1) * k]
                     m = np.mean(chunk)
                     y = chunk - m
                     z = np.cumsum(y)
                     r = np.max(z) - np.min(z)
-                    s = np.std(chunk)
-                    if s > 0: 
+                    s = np.std(chunk, ddof=1)
+                    if s > 1e-12:
                         rs_k.append(r / s)
                 if rs_k:
                     rs_list.append(np.mean(rs_k))
                     lags.append(k)
-                    
-            if not rs_list or len(rs_list) < 2:
+
+            if len(rs_list) < 2:
                 return 0.50
-                
+
             poly = np.polyfit(np.log(lags), np.log(rs_list), 1)
-            hurst = poly[0]
+            hurst = float(poly[0])
             return float(np.clip(hurst, 0.0, 1.0))
         except Exception as e:
-            logging.warning(f"Error calculando Hurst R/S: {e}")
+            logging.warning(f"Error calculando Hurst R/S sobre retornos: {e}")
             return 0.50
+
+    @staticmethod
+    def calculate_variance_ratio(prices: pd.Series, q: int = 10) -> Tuple[float, float]:
+        """
+        Test Variance Ratio heterocedástico de Lo & MacKinlay (1988).
+        - VR(q) > 1 (z* > 1.96): persistencia / momentum estadísticamente significativo.
+        - VR(q) ~ 1: hipótesis nula de caminata aleatoria.
+        - VR(q) < 1 (z* < -1.96): reversión a la media estadísticamente significativa.
+        Retorna: (vr, z_star)
+        """
+        p = pd.Series(prices).dropna().astype(float).values
+        if len(p) <= q + 10 or np.any(p <= 0):
+            return 1.0, 0.0
+
+        log_p = np.log(p)
+        r1 = np.diff(log_p)
+        n = len(r1)
+        mu = float(np.mean(r1))
+
+        # Varianza 1-periodo insesgada
+        var_1 = float(np.sum((r1 - mu) ** 2) / (n - 1))
+        if var_1 <= 1e-15:
+            return 1.0, 0.0
+
+        # Retornos solapados q-periodos
+        rq = log_p[q:] - log_p[:-q]
+        m = q * (n - q + 1) * (1.0 - q / n)
+        if m <= 0:
+            return 1.0, 0.0
+        var_q = float(np.sum((rq - q * mu) ** 2) / m)
+        vr = var_q / var_1
+
+        # Varianza asintótica robusta a heterocedasticidad (Lo-MacKinlay eq. 14)
+        denom = float(np.sum((r1 - mu) ** 2) ** 2)
+        theta = 0.0
+        for j in range(1, q):
+            num_j = float(np.sum(((r1[j:] - mu) ** 2) * ((r1[:-j] - mu) ** 2)))
+            delta_j = n * num_j / denom if denom > 0 else 0.0
+            weight_j = (2.0 * (q - j) / q) ** 2
+            theta += weight_j * delta_j
+
+        z_star = float(np.sqrt(n) * (vr - 1.0) / np.sqrt(max(theta, 1e-12))) if theta > 0 else 0.0
+        return float(vr), z_star
 
     def discover_mt5_candidates(self, max_candidates: int = 25) -> List[Dict]:
         """

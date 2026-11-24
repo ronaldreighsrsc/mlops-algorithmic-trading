@@ -115,16 +115,10 @@ class DataExtractor:
                 df = df.reset_index().merge(macro_df_temp, on='date_key', how='left').set_index('time')
                 df.drop(columns=['date_key'], inplace=True, errors='ignore')
 
-            # Forward fill para feriados o barras intradía
+            # Forward fill ESTRICTAMENTE CAUSAL para feriados o barras intradía (NUNCA bfill)
             for macro_col in ['VIX_close', 'DXY_close', 'Yield10Y']:
                 if macro_col in df.columns:
-                    df[macro_col] = df[macro_col].ffill().bfill()
-
-            df['VIX_close'] = df['VIX_close'].bfill()
-        if 'DXY_close' in df.columns:
-            df['DXY_close'] = df['DXY_close'].bfill()
-        if 'Yield10Y' in df.columns:
-            df['Yield10Y'] = df['Yield10Y'].ffill().bfill()
+                    df[macro_col] = df[macro_col].ffill()
             
         logging.info(f"Éxito: Se extrajeron {len(df)} registros totales para {symbol}.")
         return df
@@ -146,13 +140,13 @@ class DataExtractor:
             df.index = df.index.tz_localize(None).normalize()
             df.index.name = 'time'
             
-            # Merge with macro data (VIX & DXY & Yield10Y)
+            # Merge with macro data (VIX & DXY & Yield10Y) — solo ffill causal (sin bfill)
             macro_df = self._fetch_macro_data(start_date, end_date)
             if not macro_df.empty:
                 df = df.join(macro_df, how='left')
-                if 'VIX_close' in df.columns: df['VIX_close'] = df['VIX_close'].ffill().bfill()
-                if 'DXY_close' in df.columns: df['DXY_close'] = df['DXY_close'].ffill().bfill()
-                if 'Yield10Y' in df.columns: df['Yield10Y'] = df['Yield10Y'].ffill().bfill()
+                if 'VIX_close' in df.columns: df['VIX_close'] = df['VIX_close'].ffill()
+                if 'DXY_close' in df.columns: df['DXY_close'] = df['DXY_close'].ffill()
+                if 'Yield10Y' in df.columns: df['Yield10Y'] = df['Yield10Y'].ffill()
                 
             # MERGE WITH CHILEAN MACRO DATA FOR ECH
             if symbol == "ECH":
@@ -162,8 +156,7 @@ class DataExtractor:
                     cols_to_use = [c for c in df_chile.columns if c not in df.columns]
                     if cols_to_use:
                         df = df.join(df_chile[cols_to_use], how='left')
-                        # Forward fill para feriados
-                        df[cols_to_use] = df[cols_to_use].ffill().bfill()
+                        df[cols_to_use] = df[cols_to_use].ffill()
 
                 
             logging.info(f"Éxito: Se extrajeron {len(df)} registros totales para {symbol} vía yfinance.")

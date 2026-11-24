@@ -16,21 +16,23 @@ class RandomForestTrainer:
     validación cruzada avanzada (Purged & Embargoed) y predicción Walk-Forward.
     """
     def __init__(self, look_back: int = 60, retrain_step: int = 50, 
-                 n_splits: int = 3, purge_size: int = 60, embargo_size: int = 10):
+                 n_splits: int = 3, purge_size: int = 60, embargo_size: int = 10,
+                 max_hold: int = 10):
         self.look_back = look_back
         self.retrain_step = retrain_step
         self.n_splits = n_splits
         self.purge_size = purge_size
         self.embargo_size = embargo_size
+        self.max_hold = max_hold
         self.scaler = StandardScaler()
 
     def prepare_sequences(self, df: pd.DataFrame, target_col: str, feature_cols: list) -> tuple:
         """
         Transforma el DataFrame bidimensional en secuencias planas (ventanas de tiempo) 
-        para que Random Forest pueda procesar memoria histórica.
+        de forma estrictamente causal (ffill + dropna, NUNCA bfill).
         """
         df_clean = df.copy()
-        df_clean = df_clean.replace([np.inf, -np.inf], np.nan).ffill().bfill()
+        df_clean = df_clean.replace([np.inf, -np.inf], np.nan).ffill().dropna()
         
         y_array = df_clean[target_col].values
         features = [c for c in feature_cols if c != target_col]
@@ -154,11 +156,13 @@ class RandomForestTrainer:
             prob = master_model.predict_proba(X_test_scaled[i].reshape(1, -1))[0][1]
             pred_probs.append(prob)
             
-            # Reentrenamiento periódico
+            # Reentrenamiento periódico ESTRICTAMENTE CAUSAL (purga de max_hold etiquetas abiertas)
             if (i + 1) % self.retrain_step == 0:
-                curr_X = np.concatenate((X_train_scaled, X_test_scaled[:i+1]))
-                curr_y = np.concatenate((y_train, y_test[:i+1]))
-                master_model.fit(curr_X, curr_y)
+                resolved_cutoff = i + 1 - self.max_hold
+                if resolved_cutoff > 0:
+                    curr_X = np.concatenate((X_train_scaled, X_test_scaled[:resolved_cutoff]))
+                    curr_y = np.concatenate((y_train, y_test[:resolved_cutoff]))
+                    master_model.fit(curr_X, curr_y)
 
         # 4. Feature Importance final (del último modelo ajustado)
         # Calculamos cuántas variables originales hay (columnas totales / días de look_back)

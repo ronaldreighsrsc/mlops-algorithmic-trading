@@ -93,12 +93,13 @@ class CPCVAuditor:
         df_sub = df_processed.iloc[-n_samples:].copy()
         probs_sub = probs[-n_samples:]
         
-        # Retorno diario simulado de la estrategia
+        # Retorno diario simulado de la estrategia (ESTRICTO shift(1): la señal del cierre t-1 opera el retorno de t)
         close_prices = df_sub['close'].values
         daily_returns = np.diff(close_prices) / close_prices[:-1]
         daily_returns = np.insert(daily_returns, 0, 0.0)
 
-        signals = (probs_sub > confidence_threshold).astype(int)
+        raw_signals = (probs_sub > confidence_threshold).astype(int)
+        signals = np.insert(raw_signals[:-1], 0, 0)
         strategy_returns = daily_returns * signals
 
         paths = self.generate_combinatorial_splits(n_samples, n_groups=n_groups, k_test=k_test)

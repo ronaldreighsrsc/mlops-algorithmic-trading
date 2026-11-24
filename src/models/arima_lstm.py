@@ -124,30 +124,33 @@ class HybridARIMALSTMTrainer:
                 print(f"  🔍 [FASE 2] Optimizando LSTM Clasificador (Optuna Bayesiana TPE - Purged CV)...")
                 tf.keras.backend.clear_session()
 
-                scaler = StandardScaler()
                 s_tr, t_steps, _ = X_train_raw.shape
-                X_train_scaled = np.clip(
-                    scaler.fit_transform(X_train_raw.reshape(-1, n_feat)), -10, 10
-                ).reshape(s_tr, t_steps, n_feat)
-
                 folds = self._get_purged_embargoed_folds(s_tr)
 
                 def objective(trial):
-                    units = trial.suggest_categorical('units', [32, 64, 128])
-                    dropout = trial.suggest_float('dropout', 0.1, 0.4, step=0.1)
+                    units = trial.suggest_categorical('units', [16, 32, 64])
+                    dropout = trial.suggest_float('dropout', 0.2, 0.4, step=0.1)
 
                     fold_accs = []
                     for fold_idx, (train_idx, val_idx) in enumerate(folds):
                         if len(train_idx) == 0: continue
+                        fold_scaler = StandardScaler()
+                        X_tr_f = np.clip(
+                            fold_scaler.fit_transform(X_train_raw[train_idx].reshape(-1, n_feat)), -10, 10
+                        ).reshape(len(train_idx), t_steps, n_feat)
+                        X_val_f = np.clip(
+                            fold_scaler.transform(X_train_raw[val_idx].reshape(-1, n_feat)), -10, 10
+                        ).reshape(len(val_idx), t_steps, n_feat)
+
                         model_cv = self._build_lstm_classifier((t_steps, n_feat), units=units, dropout=dropout)
                         es = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True, verbose=0)
                         model_cv.fit(
-                            X_train_scaled[train_idx], y_train_raw[train_idx],
+                            X_tr_f, y_train_raw[train_idx],
                             epochs=15, batch_size=32,
-                            validation_data=(X_train_scaled[val_idx], y_train_raw[val_idx]),
-                            callbacks=[es], verbose=0, shuffle=True
+                            validation_data=(X_val_f, y_train_raw[val_idx]),
+                            callbacks=[es], verbose=0, shuffle=False
                         )
-                        preds = (model_cv.predict(X_train_scaled[val_idx], verbose=0) > 0.5).astype(int)
+                        preds = (model_cv.predict(X_val_f, verbose=0) > 0.5).astype(int)
                         acc = accuracy_score(y_train_raw[val_idx], preds)
                         fold_accs.append(acc)
 
