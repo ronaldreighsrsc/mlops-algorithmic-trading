@@ -1,535 +1,246 @@
-# 📈 Autonomous Institutional Quantitative Trading Infrastructure
-## AlphaEdge Sentinel v3.0 — MetaTrader 5 & Darwinex Enterprise Edition
-### 4-Layer AFML Architecture (CUSUM → Primary → Calibrated Meta-ML → Risk Overlays) | Real ONNX (< 1e-5 Parity) | CSCV PBO & Empirical DSR
+# Quantitative Trading Research & Execution Pipeline (Python / MT5)
 
-![Python](https://img.shields.io/badge/Python-3.12-blue?style=for-the-badge&logo=python)
-![MetaTrader5](https://img.shields.io/badge/MetaTrader_5-Native_Bridge-green?style=for-the-badge)
-![ONNX Runtime](https://img.shields.io/badge/ONNX_Runtime-Real_Parity_<1e--5-005ced?style=for-the-badge&logo=onnx)
-![VPS Footprint](https://img.shields.io/badge/VPS_RAM-<130MB_Zero_OOM-brightgreen?style=for-the-badge)
-![Validation](https://img.shields.io/badge/CSCV_PBO-Empirical_DSR-orange?style=for-the-badge)
-![Theory](https://img.shields.io/badge/AFML-CUSUM_MetaLabel_FFD_HRP-purple?style=for-the-badge)
-![Persistence](https://img.shields.io/badge/SQLite_WAL-ACID_In--Process-003B57?style=for-the-badge&logo=sqlite)
-![Regimes](https://img.shields.io/badge/HMM_3--State-Bull_Bear_Choppy-red?style=for-the-badge)
-![Pytest](https://img.shields.io/badge/Tests-92%2F92_Passing_100%25-success?style=for-the-badge&logo=pytest)
-![MLflow](https://img.shields.io/badge/MLflow-Model_Registry-0194e2?style=for-the-badge&logo=mlflow)
+Laboratorio de ingeniería cuantitativa y MLOps aplicado a series temporales financieras, basado en la metodología de *Advances in Financial Machine Learning* (Marcos López de Prado) y desacoplado en entrenamiento offline e inferencia ligera con **ONNX Runtime** y **SQLite WAL**.
 
-Infraestructura de trading cuantitativo algorítmico de grado **Hedge Fund / Prop Trading Desk**, diseñada para operar de manera autónoma en **MetaTrader 5 (MT5)** y optimizada para el broker ECN **Darwinex**. Combina una arquitectura de ejecución desacoplada de ultra-baja latencia (< 15 ms, **v2.0**) con la refactorización metodológica completa de *Advances in Financial Machine Learning* (**v3.0**, especificación técnica en [`docs/SPEC_QUANT_V3_INSTITUTIONAL_ALPHA.md`](docs/SPEC_QUANT_V3_INSTITUTIONAL_ALPHA.md)).
+![Python](https://img.shields.io/badge/Python-3.12-blue?style=flat-square&logo=python)
+![Pytest](https://img.shields.io/badge/Tests-92%2F92_Passing-success?style=flat-square&logo=pytest)
+![ONNX Runtime](https://img.shields.io/badge/ONNX-Parity_<1e--5-005ced?style=flat-square&logo=onnx)
+![Persistence](https://img.shields.io/badge/SQLite_WAL-ACID_In--Process-003B57?style=flat-square&logo=sqlite)
+![Validation](https://img.shields.io/badge/Validation-CSCV_PBO_%26_DSR-orange?style=flat-square)
 
 ---
 
-## 🧠 Evolución Metodológica v3.0 — Las 4 Capas Cuantitativas Ortogonales (AFML)
+## 1. Alcance, Enfoque y Limitaciones del Ecosistema
 
-Para eliminar fugas temporales, sobreparametrización de redes neuronales sobre Time Bars y *backtest overfitting*, la **v3.0** separa estrictamente el sistema en cuatro capas independientes:
+Este repositorio nació como un pipeline de trading algorítmico sobre **MetaTrader 5 (MT5)** y evolucionó hacia un sistema de investigación y validación reproducible enfocado en resolver tres problemas reales de ingeniería de datos y ML financiero:
 
-1. **Capa 0 — Muestreo de Información (`src/preprocessing/cusum_filter.py`, `information_bars.py`):**
-   - En **D1:** **Filtro CUSUM Simétrico** dinámico calibrado por volatilidad EGARCH ($\sigma_{t-1}$) para muestrear solo desplazamientos estructurales.
-   - En **Intradía (MT5 OTC):** **Tick Bars** y **Tick Imbalance Bars (TIBs)** desde flujo de ticks, reduciendo la curtosis excesiva frente a Time Bars con sonrisa de volumen intradía.
-   - Screening con **Exponente de Hurst sobre retornos estacionarios** + **Variance Ratio Test** heterocedástico de Lo-MacKinlay (`asset_screener.py`).
-2. **Capa 1 — Modelo Primario Económico (`src/strategies/primary_strategies.py`):**
-   - Estrategias causales transparentes de alto Recall (`TrendPullbackPrimary`, `DonchianBreakoutPrimary`, `VolatilityMeanReversionPrimary`) que proponen únicamente el lado `side ∈ {-1, 0, +1}` (cero redes neuronales).
-3. **Capa 2 — Meta-Modelo Tabular Calibrado (`src/models/meta_trainer_v3.py`, `meta_labeling.py`, `sample_weights.py`):**
-   - **`MetaBarrierLabeler`:** Triple Barrera orientada simétricamente por `side` con entrada causal en `Open[t+1]`, descuento de fricción real e intervalos exactos `[t0, t1]`.
-   - **Sample Uniqueness (AFML Cap. 4):** Concurrencia $c_t$, unicidad media $\bar{u}_i$, atribución por retorno y time-decay.
-   - **Features Multi-Escala & Poda MDA OOS (`tabular_features.py`, `feature_importance.py`):** 15–22 features causales (sin aplanado de 480 columnas ni `.bfill()`), podadas por **MDA Purgado** (`PurgedKFold([t0, t1])`).
-   - **Torneo Tabular + Calibración Purgada (`calibration.py`):** `LogisticRegression L2`, `XGBoost`, `LightGBM` y `RandomForest` (`max_samples = avg_uniqueness`), optimizando **Log-Loss** + **PurgedPlattCalibrator** sobre OOF purgado (cero OOS threshold snooping; umbral económico analítico).
-   - **Gobernanza Anti-Overfitting (`cpcv_auditor.py`):** **Deflated Sharpe Ratio (DSR)** con varianza empírica de los ensayos del torneo y **CSCV PBO formal** sobre la matriz $T \times N$ de estrategias (Bailey & López de Prado, 2014).
-4. **Capa 3 — Ejecución Real ONNX & Risk Overlays (`execution_gateway.py`, `analytics_daemon.py`, `onnx_exporter.py`):**
-   - Exportación **ONNX real autocontenida** (`SimpleImputer` + `StandardScaler` + Clasificador + nodos Platt) con compuerta obligatoria de **paridad numérica `< 1e-5`** (verificada en ~`1e-7`) y **política Fail-Closed** ante checksum SHA-256 inválido.
-   - `ffd_d_map` congelado en `campeon_{symbol}_v3.json` (paridad estricta Train/Serve), `CostSensitiveGatekeeper` ($E[U] \ge 2.5\times$ fricción), HMM 3-estados + KS-Drift, `MacroHazardGuard`, Autoencoder P90/P99 sobre telemetría `(N, 3)` y `TradeVault` SQLite WAL.
+1. **Prevenir *data leakage* temporal y *backtest overfitting*:** validación purgada por intervalos `[t0, t1]`, pesos por unicidad de muestra, poda de features *out-of-sample* (MDA) y auditoría estadística **CSCV PBO** + **Deflated Sharpe Ratio (DSR)**.
+2. **Separar generación de hipótesis de filtrado estadístico (Meta-Labeling real en 2 etapas):** evitar obligar a modelos complejos a predecir dirección diaria en días sin información.
+3. **Aislar dependencias entre entrenamiento e inferencia:** evitar cargar ~1.4 GB de TensorFlow/Keras en un servidor de ejecución ligero mediante exportación real a **ONNX** (`< 130 MB` RAM) y sincronización no bloqueante vía **SQLite WAL**.
 
-> [!NOTE]
-> **Hallazgo Empírico Honesto (Auditoría Real v3.0 sobre D1 OHLCV):**  
-> Al correr `python src/main_training_v3.py` sin leakage temporal ni *threshold snooping* sobre `EURUSD`, `Oro` y `SP500`, el pipeline exportó los modelos calibrados con paridad ONNX `< 2e-7` (`ECE = 0.028–0.083`), pero el auditor **CSCV PBO formal** reportó `PBO = 50%–86%` y `LogLoss ≈ 0.69` (`Brier ≈ 0.25`) — demostrando empíricamente que las features OHLCV/técnicas diarias por sí solas no producen alpha suficiente para superar las compuertas institucionales de capital real sin incorporar fuentes de señal alternativas o microestructura. Ese rechazo automático es precisamente la función de un auditor cuantitativo serio.
+> **Nota de Contexto Institucional:** El conector de mercado utiliza **MetaTrader 5** (entorno *retail* / *prop* sobre CFDs y FX). No implementa protocolos institucionales de renta fija o acciones locales como **FIX**, feeds **Bloomberg** ni reglas regulatorias de un OMS corporativo bajo normativa CMF. El foco técnico del proyecto es la **ingeniería de datos temporales, validación estadística sin sesgos y MLOps reproducible**.
 
 ---
 
-## 🏗️ Arquitectura Desacoplada en Doble Motor (SLA < 15 ms vs. Async Worker)
+## 2. Resultados Empíricos Reales & Decisiones de Descarte (v3.0)
 
-En la operativa institucional real, calcular simulaciones pesadas de 300 días o reajustar gradientes neuronales en la ruta crítica de mercado destruye la ejecución provocando **deslizamientos severos (slippage)** y pérdidas de ventanas de liquidez. La versión **v2.0** desacopla completamente el sistema en dos motores autónomos sincronizados de forma no bloqueante a través de **SQLite Write-Ahead Logging (WAL)**:
+Al auditar la versión previa del proyecto (v1.0/v2.0), se detectaron y corrigieron **sobreparametrización** (`BiLSTM` de ~300K–1.2M parámetros sobre ~3,000 velas diarias), **Pseudo Meta-Labeling** (etiquetado Long-only sin modelo primario ni filtro de eventos), **fuga temporal de `max_hold=10` días** en el reentrenamiento *walk-forward*, ***threshold snooping*** directo sobre el test set OOS, y un exportador ONNX prototipo que no reflejaba pesos reales.
 
-```
-═══════════════════════════════════════════════════════════════════════════════════════════════════
-                   ARQUITECTURA INSTITUCIONAL DESACOPLADA (ALPHAEDGE SENTINEL v2.0)
-═══════════════════════════════════════════════════════════════════════════════════════════════════
+Tras refactorizar el pipeline a **v3.0** (`python src/main_training_v3.py`, cero *leakage*, umbral económico analítico, calibración Platt sobre OOF purgado y exportación ONNX real), estos son los **resultados reales obtenidos *out-of-sample*** sobre datos diarios (`D1`) de `EURUSD`, `Oro` y `SP500`:
 
- [PROCESO 1: EXECUTION ENGINE GATEWAY (SLA < 15 ms)]
- ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
- │ MT5 New Tick / Bar Event                                                                    │
- │       │                                                                                     │
- │       ▼                                                                                     │
- │ CAPA 1: Hard Risk Kill-Switch en RAM ──► (Drawdown Diario > 2.5%?) ──► [ABORT IMMEDIATE]   │
- │       │ (Aprobado)                                                                          │
- │       ▼                                                                                     │
- │ CAPA 2: Estado de Cuarentena O(1) en TradeVault WAL ─────────────────► [ABORT CUARENTENA]  │
- │       │ (Saludable)                                                                         │
- │       ▼                                                                                     │
- │ CAPA 3: Pre-News Macro Hazard Guard (-30m / +15m FOMC, CPI, NFP) ───► [FREEZE PRE-NEWS]    │
- │       │ (Mercado Seguro)                                                                    │
- │       ▼                                                                                     │
- │ CAPA 4: Inferencia C++ BLAS con ONNX Runtime (< 1.8 ms) ────────────► Probabilidad P(TP)   │
- │       │                                                                                     │
- │       ▼                                                                                     │
- │ CAPA 5: Cost-Sensitive Gatekeeper ──► E[U] >= 2.5 * Fricción? ──────► [RECHAZAR POR COSTO] │
- │       │ (Aprobado)                                                                          │
- │       ▼                                                                                     │
- │ CAPA 6: Kelly Sizing Dinámico Modulado por HMM 3-Estados & KS-Drift                         │
- │       │                                                                                     │
- │       ▼                                                                                     │
- │ CAPA 7: MT5 Order Send (< 10 ms) & Registro Transaccional en SQLite WAL (`TradeVault`)      │
- └─────────────────────────────────────────────────────────────────────────────────────────────┘
-                                ▲
-                                │ Sincronización Asíncrona ACID (SQLite WAL `trading_vault.db`)
-                                │ (system_state: cuarentena, drift, pesos HRP, heartbeat)
- [PROCESO 2: BACKGROUND ANALYTICS & MLOps DAEMON]
- ┌─────────────────────────────────────────────────────────────────────────────────────────────┐
- │ • Simulación periódica de Shadow Journal de 300 días                                        │
- │ • Monitoreo de Error de Reconstrucción LSTM Autoencoder (P90 Drift vs. P99 Kill-Switch)     │
- │ • Auto-Rebalanceo Mensual de Portafolio HRP (Shrinkage Bayesiano λ = 0.85)                  │
- │ • Recalibración Continua Bayesiana de Monte Carlo MDD cada 30 trades reales                 │
- │ • Verificación de Integridad Criptográfica de Modelos ONNX mediante Checksums SHA-256      │
- └─────────────────────────────────────────────────────────────────────────────────────────────┘
-```
+| Activo | Modelo Ganador (CV LogLoss) | Features tras MDA | CV LogLoss | OOS Brier | OOS ECE | DSR Empírico | **CSCV PBO Formal** | Paridad ONNX Real |
+| :--- | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| **`EURUSD`** | `RANDOM_FOREST` (Calibrado) | 7 | `0.6871` | `0.2511` | `0.0276` | `0.829` | **`84.29%`** | **`9.29e-08`** |
+| **`Oro`** | `RANDOM_FOREST` (Calibrado) | 13 | `0.7054` | `0.2473` | `0.0828` | `0.998` | **`50.00%`** | **`1.79e-07`** |
+| **`SP500`** | `RANDOM_FOREST` (Calibrado) | 8 | `0.6929` | `0.2502` | `0.0317` | `0.860` | **`85.71%`** | **`8.27e-08`** |
+
+### Qué muestran estos números (y qué se descartó)
+- **Por qué se descartaron las redes `BiLSTM` / `LSTM` en `D1`:** Con ~2,500–4,000 barras diarias y baja relación señal/ruido, las redes recurrentes profundas memorizaban ruido y ganaban torneos por selección múltiple sin filtro DSR. Un `RandomForest` regularizado (`max_depth=5`, `max_samples = avg_uniqueness`) y calibrado logró menor Log-Loss en validación purgada y calibración consistente (`ECE ≈ 0.03`).
+- **Conclusión estadística honesta:** Una vez eliminados el *leakage* y la optimización de umbrales sobre el test set, el auditor **CSCV PBO formal** arrojó `PBO = 50%–86%` y `LogLoss ≈ ln(2) = 0.693`. Esto demuestra empíricamente que **features exclusivamente técnicas/OHLCV en velas diarias no generan alpha desplegable con capital real** sin incorporar fuentes de señal alternativas o microestructura. El sistema está diseñado para **rechazar** estas estrategias en auditoría en lugar de promover un backtest maquillado.
 
 ---
 
-## 🔬 Detalle Técnico de los 6 Pilares Institucionales v2.0
+## 3. Arquitectura del Sistema (4 Capas Cuantitativas + Ejecución Desacoplada)
 
-### 1. Desacoplamiento Estricto de SLAs (`src/execution/`)
-- **`execution_gateway.py` (Proceso 1):** Bucle de ejecución de alta velocidad con SLA garantizado inferior a **15 milisegundos**. No ejecuta reentrenamientos ni cálculos de 300 días; consulta el estado de salud del sistema en tiempo $\mathcal{O}(1)$ desde la memoria/WAL.
-- **`analytics_daemon.py` (Proceso 2):** Proceso en segundo plano que se ejecuta fuera de los horarios críticos de apertura (o en hilo asíncrono no bloqueante), procesando el Shadow Journal, calibrando la volatilidad EGARCH y actualizando los pesos de portafolio HRP.
-- **`main_bot_v2.py`:** Orquestador maestro que permite lanzar el sistema en 3 modalidades:
-  - `--mode dual`: Modo unificado de grado producción (Gateway en hilo principal + Daemon MLOps asíncrono).
-  - `--mode gateway`: Exclusivamente el motor de ejecución en vivo (ideal para VPS de ultra-bajos recursos).
-  - `--mode daemon`: Exclusivamente el trabajador analítico MLOps.
+### 3.1 Flujo de Señal y Validación (v3.0 — `src/main_training_v3.py`)
 
-### 2. Inferencia Ultra-Eficiente con ONNX Runtime (< 130 MB RAM, < 1.8 ms)
-- **`onnx_inference_engine.py`:** Sustituye el grafo pesado de TensorFlow/Keras en producción por **ONNX Runtime (C++ BLAS)**:
-  - Opciones de sesión optimizadas para VPS de 1 socket: `intra_op_num_threads=2`, `execution_mode=ORT_SEQUENTIAL`, `graph_optimization_level=ORT_ENABLE_ALL`.
-  - Inferencia con memoria C-continua `np.ascontiguousarray` en `float32`.
-  - **Reducción de RAM:** Pasa de ~1,400 MB a **menos de 130 MB**, eliminando el riesgo de Out-of-Memory (OOM) en instancias cloud económicas de 1 GB.
-  - **Latencia:** Pasa de 50-80 ms a **< 1.8 ms** por pasada.
-- **`onnx_exporter.py` & `export_champions_to_onnx.py`:** Herramientas de exportación con gobernanza criptográfica: calcula y valida el hash **SHA-256** de cada modelo frente al manifiesto inmutable `onnx_manifest.json`.
-
-### 3. Filtro Microestructural Sensible al Costo (`cost_sensitive_gatekeeper.py`)
-En el trading real institucional con brokers ECN (Darwinex), los modelos que ignoran la microestructura son destruidos por el ensanchamiento de spreads y el deslizamiento estocástico. El sistema implementa una **Función de Utilidad Neta Esperada**:
-
-$$\mathbb{E}[U_t] = \hat{P}(\text{TP}) \cdot R_{TP} - (1 - \hat{P}(\text{TP})) \cdot |R_{SL}| - \mathcal{C}_{\text{fricción}}(t)$$
-
-Donde el costo total de fricción $\mathcal{C}_{\text{fricción}}(t)$ se descompone estocásticamente en tiempo real como:
-
-$$\mathcal{C}_{\text{fricción}}(t) = \text{Spread}_t + \underbrace{\left(0.20 \cdot \text{Spread}_t + 0.05 \cdot \text{ATR}_t \cdot \sqrt{\frac{V_t}{\bar{V}_t}}\right)}_{\text{Slippage Estocástico}} + \underbrace{\text{Swap Diario} \times \mathbb{E}[T_{\text{holding}}]}_{\text{Costo de Financiamiento}}$$
-
-**Regla de Hurdle Rate Institucional:**
-$$\text{Si } \frac{\mathbb{E}[U_t]}{\mathcal{C}_{\text{fricción}}(t)} < 2.5 \implies \textbf{RECHAZAR ORDEN (Edge Insuficiente)}$$
-
-Si el retorno esperado bruto no supera al menos **2.5 veces el costo total de fricción**, la orden se descarta automáticamente con estado `REJECTED_BY_FRICTION` y queda registrada en la auditoría sin arriesgar capital.
-
-### 4. Detección de Regímenes HMM 3-Estados & Kolmogorov-Smirnov Drift (`regime_detector.py`)
-El LSTM Autoencoder unidimensional solo detecta si una vela es atípica, pero no sabe si el mercado está en tendencia o en consolidación caótica. `InstitutionalRegimeDetector` formaliza un modelo de Markov Oculto Gaussiano (**Gaussian HMM**) de 3 estados:
-
-```
-                   ┌──────────────────────────────────────────┐
-                   │    REGÍMENES DE MERCADO INSTITUCIONALES  │
-                   └────────────────────┬─────────────────────┘
-                                        │
-             ┌──────────────────────────┼──────────────────────────┐
-             ▼                          ▼                          ▼
-    ┌─────────────────┐        ┌─────────────────┐        ┌───────────────────────┐
-    │ Estado 0:       │        │ Estado 1:       │        │ Estado 2:             │
-    │ TENDENCIA ALTA  │        │ TENDENCIA BAJA  │        │ RANGO TURBULENTO/CHOP │
-    │ (Bull Trend)    │        │ (Bear Trend)    │        │ (High Vol, No Trend)  │
-    ├─────────────────┤        ├─────────────────┤        ├───────────────────────┤
-    │ • Kelly: 1.0x   │        │ • Kelly: 1.0x   │        │ • Kelly: 0.25x / CASH │
-    │ • Foco: Compras │        │ • Foco: Ventas  │        │ • Bloqueo de breakout │
-    │ • Barreras TP+  │        │ • Barreras TP-  │        │ • Protege de serrucho │
-    └─────────────────┘        └─────────────────┘        └───────────────────────┘
+```text
+[Datos OHLCV / Macro]
+   │
+   ├──► Capa 0: Muestreo por Información
+   │      • D1: Filtro CUSUM Simétrico (umbral h_t = κ · σ_{t-1, EGARCH})
+   │      • Intradía (opcional MT5 OTC): Tick Bars & Tick Imbalance Bars (information_bars.py)
+   │      • Screening: Hurst sobre retornos estacionarios + Variance Ratio Lo-MacKinlay
+   │
+   ├──► Capa 1: Modelo Primario Causal (src/strategies/primary_strategies.py)
+   │      • Reglas estructurales simples (TrendPullback, DonchianBreakout, MeanReversion)
+   │      • Emite únicamente dirección candidata: side ∈ {-1, 0, +1}
+   │
+   ├──► Capa 2: Meta-Modelo Tabular Calibrado (src/models/meta_trainer_v3.py)
+   │      • MetaBarrierLabeler orientado por `side` con intervalos exactos [t0, t1]
+   │      • Pesos por unicidad de muestra (concurrency + time-decay, sample_weights.py)
+   │      • 15–22 features tabulares causales (tabular_features.py, sin .bfill())
+   │      • Poda OOS por MDA Purgado (feature_importance.py)
+   │      • Torneo tabular (Logistic L2, XGBoost, LightGBM, RF) en PurgedKFold([t0, t1])
+   │      • Calibración PurgedPlattCalibrator + compuertas DSR y CSCV PBO (T x N)
+   │
+   └──► Capa 3: Serving ONNX & Control de Riesgo (src/execution/)
+          • Exportación Pipeline real (Imputer + Scaler + Modelo + Platt) -> .onnx + SHA-256
+          • Compuerta obligatoria de paridad numérica < 1e-5 contra modelo Python
+          • Política Fail-Closed ante corrupción o hash inválido (sin fallback silencioso)
 ```
 
-- **Monitor de Volatilidad Kolmogorov-Smirnov (KS-Test):**
-  - Evalúa la función de distribución acumulada (CDF) de los retornos de las últimas 50 velas contra la distribución histórica in-sample (`scipy.stats.ks_2samp`).
-  - Si el p-valor $< 0.01$, diagnostica formalmente **Regime Drift**: reduce preventivamente el riesgo de Kelly al **50% (Safety Factor = 0.50x)** y emite una alerta a Telegram para programar el reajuste de hiperparámetros.
+### 3.2 Ejecución Desacoplada en Producción (`main_bot_v2.py`)
 
-### 5. Agente GenAI Macro-Hazard Pre-News y Reportes Forenses (`src/macro/`)
-- **`macro_rag_agent.py`:** Protege el portafolio contra shocks exógenos de política monetaria (FOMC, CPI, Non-Farm Payrolls, Decisiones de Tasas de Interés Centrales):
-  - **Ventana Pre-News (Congelamiento):** Congela la apertura de nuevas posiciones 30 minutos antes del anuncio programado (`FREEZE_PRE_NEWS`).
-  - **Ventana Post-News (Cooldown):** Mantiene 15 minutos de enfriamiento posterior mientras se normaliza la liquidez del libro de órdenes.
-  - **Bitácora Forense Post-Trade (RCA):** Si ocurre una salida por Stop Loss o drawdown inesperado, cruza el timestamp exacto con el calendario macroeconómico e imprime un informe estructurado de análisis de causa raíz para comités de inversión y Darwinex.
-- **`economic_calendar.py`:** Proveedor de eventos macroeconómicos programados con persistencia local en caché JSON.
+El runtime separa el loop de trading del trabajo analítico pesado sincronizándolos mediante **SQLite en modo WAL (`results/trading_vault.db`)**:
 
-### 6. Bóveda Transaccional ACID In-Process (`src/database/trade_vault.py`)
-Reemplaza los archivos planos `.json` y `.csv` de la v1.0 por una base de datos embebida **SQLite en modo Write-Ahead Logging (WAL)**:
-- **Cero latencia de red:** Base de datos embebida in-process sin sobrecarga de sockets TCP.
-- **Tolerancia a cortes de energía:** Transacciones ACID garantizadas ante reinicios abruptos de servidores VPS o instancias AWS EC2.
-- **Auditabilidad Total:** Cada orden, probabilidad del ONNX, spread al momento del llenado, slippage, error MSE del autoencoder y ratio hurdle queda indexado en la tabla `execution_audit_log`.
+- **`execution_gateway.py` (Proceso 1 — Loop de Trading):** consulta el estado de cuarentena en $O(1)$ desde SQLite WAL, valida ventanas de calendario macro (`MacroHazardGuard`, bloqueo `-30m / +15m` alrededor de FOMC/CPI/NFP desde caché JSON), evalúa el modelo ONNX (`< 130 MB` de RAM al no importar TensorFlow) aplicando `ffd_d_map` congelado, verifica utilidad neta esperada frente a costos estimados (`CostSensitiveGatekeeper`: $E[U] \ge 2.5 \times \text{fricción}$) y registra cada decisión (aprobada o rechazada) en `execution_audit_log`.
+  - *Nota operacional sobre latencia:* en operativa de velas diarias (`D1`) con polling (`--interval 5.0`), inferir en `< 2 ms` vía ONNX no busca competir en HFT ni reducir slippage intrabar; el beneficio práctico en producción es **eliminar la huella de memoria de ~1.4 GB de TensorFlow/Keras** en servidores VPS económicos y mantener el loop libre de bloqueos.
+- **`analytics_daemon.py` (Proceso 2 — Worker Asíncrono):** ejecuta fuera de la ruta crítica la evaluación del Autoencoder sobre telemetría de trades realizados `[net_ret, duration, win_flag]` (alertas P90/P99), actualización mensual de pesos **HRP** (*Hierarchical Risk Parity* con fallback a `1/N`) y publicación de estado en `TradeVault`.
 
----
+### 3.3 Separación de Entornos
 
-## 📊 Matriz Comparativa de Evolución Arquitectónica (v1.0 vs. v2.0)
-
-| Dimensión de Arquitectura | Quant Bot v1.0 (López de Prado Base) | Quant Bot v2.0 (AlphaEdge Sentinel) | Impacto Cuantitativo Medible |
-| :--- | :--- | :--- | :--- |
-| **Latencia Tick-to-Order** | 45 ms – 120 ms (Grafo Keras en CPU) | **< 1.8 ms (ONNX Runtime C++ BLAS)** | $\mathbf{\approx 25\times}$ más rápido; elimina slippage evitable |
-| **Concurrencia de Procesos** | Monolítico (Reentrenamiento bloquea ejecución) | **Doble Motor Desacoplado (Gateway vs. Daemon)** | Ejecución 100% libre de retrasos en aperturas de sesión |
-| **Huella de Memoria VPS** | ~1,200 MB – 1,600 MB (TensorFlow/Keras) | **< 130 MB RAM (ONNX + MT5 + NumPy)** | Despliegue seguro en VPS económicos; cero cuelgues OOM |
-| **Sensibilidad a Fricción** | Teórica (Barreras puras de precio Mid/Close) | **Filtro de Utilidad Neta ($E[U] \ge 2.5 \times \text{Cost}$)** | Filtra trades marginales devorados por spread y swap |
-| **Clasificación de Régimen** | Autoencoder P90/P99 (Detección de anomalías) | **3-State HMM + Rolling KS-Test + Autoencoder** | Reduce drawdown en rangos laterales (*choppy/whipsaw*) |
-| **Gestión de Eventos Macro** | Ciego a anuncios fundamentales programados | **Macro Hazard Guard (Pre-News Freeze & RCA)** | Blindaje contra cisnes negros de política monetaria |
-| **Persistencia de Estados** | Archivos planos `.json`, `.csv`, `.npy` | **SQLite WAL In-Process (`TradeVault` ACID)** | Cero corrupción de archivos por reinicios de VPS |
-| **Gobernanza de Modelos** | Serialización `.pkl` manual | **Exportación ONNX con Checksum SHA-256** | Integridad criptográfica inmutable en producción |
-
----
-
-## 🔌 Esquemas Transaccionales y Contratos de Auditoría
-
-### 1. Esquema de la Tabla de Auditoría (`TradeVault`)
-```sql
-CREATE TABLE IF NOT EXISTS execution_audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    ticket_id INTEGER,
-    symbol TEXT NOT NULL,
-    timeframe TEXT NOT NULL,
-    timestamp_utc TEXT NOT NULL,
-    signal_direction TEXT NOT NULL,         -- BUY, SELL, CASH
-    model_name TEXT NOT NULL,
-    prediction_prob REAL NOT NULL,
-    hmm_regime_state INTEGER NOT NULL,      -- 0: Bull, 1: Bear, 2: Choppy
-    autoencoder_mse REAL NOT NULL,
-    expected_utility REAL NOT NULL,
-    estimated_friction REAL NOT NULL,
-    spread_points REAL NOT NULL,
-    slippage_points REAL NOT NULL,
-    swap_points REAL NOT NULL,
-    hurdle_ratio REAL NOT NULL,
-    kelly_multiplier REAL NOT NULL,
-    lot_size REAL NOT NULL,
-    entry_price REAL NOT NULL,
-    tp_price REAL NOT NULL,
-    sl_price REAL NOT NULL,
-    status TEXT NOT NULL,                    -- FILLED, REJECTED_BY_FRICTION, REJECTED_BY_MACRO, CASH
-    reason TEXT,
-    raw_metadata TEXT                        -- Metadatos JSON (VIX, DXY, tick timestamp)
-);
-```
-
-### 2. Registro Transaccional de Decisión en Producción (`execution_audit_log`)
-```json
-{
-  "timestamp_utc": "2026-10-15T14:30:01.218Z",
-  "symbol": "EURUSD",
-  "timeframe": "D1",
-  "signal_direction": "BUY",
-  "model_name": "XGBOOST_PRECIO_PURO",
-  "prediction_prob": 0.7245,
-  "hmm_regime_state": 0,
-  "autoencoder_mse": 0.00084,
-  "expected_utility": 18.25,
-  "estimated_friction": 4.10,
-  "spread_points": 1.20,
-  "slippage_points": 0.65,
-  "swap_points": 0.25,
-  "hurdle_ratio": 4.45,
-  "kelly_multiplier": 1.0,
-  "lot_size": 0.24,
-  "entry_price": 1.08550,
-  "tp_price": 1.09450,
-  "sl_price": 1.08100,
-  "status": "FILLED",
-  "reason": "APROBADO: Utilidad Neta Esperada 18.25 pts (Hurdle ratio: 4.45x >= 2.50x)",
-  "latency_ms": 11.42
-}
-```
-
----
-
-## 🏆 Separación de Entornos: Training Offline vs. Serving Ultra-Lean (< 130 MB)
-
-Siguiendo las mejores prácticas de ingeniería de software y MLOps bancario, separamos las dependencias analíticas de las de ejecución en vivo:
-
-| Ámbito | Componentes & Modelos | Entorno de Ejecución & Justificación MLOps |
+| Ámbito | Módulos | Dependencias & Justificación |
 | :--- | :--- | :--- |
-| **Investigación & Torneo Offline** | `main_training.py`<br>`bilstm_model.py`<br>`arima_lstm.py`<br>`portfolio_backtester.py` | **`requirements/research.txt` (TensorFlow / Keras / Optuna / Scikit-learn):**<br>Entorno completo para entrenamiento de redes neuronales, optimización Bayesiana con poda de hiperparámetros (TPE Sampler) y validación combinatoria CPCV. |
-| **Inferencia en Producción (Serving)** | `main_bot_v2.py`<br>`execution_gateway.py`<br>`onnx_inference_engine.py`<br>`cost_sensitive_gatekeeper.py` | **`requirements/execution.txt` (ONNX Runtime / MT5 / NumPy / Requests):**<br>Entorno ultra-lean para el servidor VPS en vivo. Purga completamente TensorFlow y Keras, logrando un consumo de RAM **menor a 130 MB** con tiempo de inicio inferior a 0.5 segundos y cero riesgo de cuelgues OOM. |
+| **Investigación y Entrenamiento** | `main_training_v3.py`, `meta_trainer_v3.py`, `portfolio_backtester.py`, `cpcv_auditor.py` | `requirements/research.txt` (`scikit-learn`, `xgboost`, `lightgbm`, `skl2onnx`, `onnxmltools`, `optuna`, `statsmodels`, `arch`, `tensorflow`) |
+| **Ejecución en Producción** | `main_bot_v2.py`, `execution_gateway.py`, `onnx_inference_engine.py`, `cost_sensitive_gatekeeper.py` | `requirements/execution.txt` (`MetaTrader5`, `onnxruntime`, `numpy`, `pandas`, `requests`, `python-dotenv`) — sin TensorFlow/Keras (`< 130 MB` RAM) |
 
 ---
 
-## 🧠 Marco Metodológico de Marcos López de Prado (Core Cuantitativo)
-
-El bot preserva e integra el marco matemático riguroso de *Advances in Financial Machine Learning*:
-
-1. **Fractional Differencing (FFD):** Encuentra analíticamente el orden fraccionario mínimo $d^*$ mediante el test de Dickey-Fuller Aumentado (ADF), alcanzando estacionariedad estricta sin borrar la memoria de largo plazo ($\text{Corr} > 0.85$).
-2. **Triple Barrier Method & Meta-Labeling:** Salidas dinámicas definidas por dos barreras horizontales fijadas por la volatilidad condicional diaria $\sigma_t$ (EGARCH) y una barrera vertical temporal (`Max Hold` de 10 días).
-3. **Volatilidad Condicional EGARCH(1,1):** Modela la asimetría del apalancamiento financiero y el clustering de volatilidad para calibrar el ancho de las barreras en tiempo real.
-4. **Hierarchical Risk Parity (HRP) con Shrinkage Bayesiano:** Asigna pesos de portafolio sin inversión de matrices de covarianza inestables mediante teoría de grafos, agrupamiento jerárquico (Tree Clustering) y quasi-diagonalización, ponderado por el ratio Sharpe rodante de 100 días ($\lambda = 0.85$).
-5. **Auditoría CPCV & Probability of Backtest Overfitting (PBO):** Combinatorial Purged Cross-Validation dividiendo la historia en combinaciones $\binom{6}{2} = 15$ caminos cruzados para certificar que el Sharpe out-of-sample no es fruto de la minería de datos ($PBO < 5\%$).
-6. **Walk-Forward Rolling Monte Carlo MDD (NumPy 2D Vectorizado):** 1,000 permutaciones resampleadas calculadas cada 30 trades en vivo para dimensionar el riesgo de Kelly sin ningún sesgo de anticipación (*Lookahead Bias*).
-
----
-
-## 📦 Estructura del Repositorio
+## 4. Estructura del Repositorio
 
 ```text
 quant-trading-bot/
-├── data/
-│   ├── raw/                              # Velas históricas crudas MT5 (CSV)
-│   └── processed/                        # Datasets con FFD, EGARCH y exógenas
+├── docs/
+│   └── SPEC_QUANT_V3_INSTITUTIONAL_ALPHA.md  # Spec completo de auditoría y refactor v3.0
 ├── requirements/
-│   ├── execution.txt                     # [v2.0] Ultra-lean para VPS (< 130 MB RAM)
-│   └── research.txt                      # [v2.0] Suite de investigación y entrenamiento DL
+│   ├── execution.txt                     # Entorno ligero de inferencia (< 130 MB RAM)
+│   └── research.txt                      # Entorno completo de investigación y exportación ONNX
 ├── src/
-│   ├── database/                         # [v2.0] Capa de Persistencia Transaccional ACID
-│   │   ├── __init__.py
-│   │   └── trade_vault.py                # SQLite WAL In-Process TradeVault
-│   ├── execution/                        # Motores de Ejecución y Gestión de Riesgo
-│   │   ├── analytics_daemon.py           # [v2.0] Demonio Asíncrono MLOps (Shadow Journal, HRP)
-│   │   ├── cost_sensitive_gatekeeper.py  # [v2.0] Filtro de Fricción y Hurdle Rate (2.5x)
-│   │   ├── execution_engine.py           # Conexión directa a deals MT5
-│   │   ├── execution_gateway.py          # [v2.0] Gateway de ultra-baja latencia (< 15 ms)
-│   │   ├── main_bot_v2.py                # [v2.0] Orquestador Institucional (Dual/Gateway/Daemon)
-│   │   ├── main_bot.py                   # Bot legacy v1.0 (retrocompatibilidad)
-│   │   ├── onnx_inference_engine.py      # [v2.0] Motor de Inferencia C++ BLAS (< 1.8 ms)
-│   │   ├── risk_manager.py               # Position Sizing Kelly y Monitor Híbrido
-│   │   └── telegram_notifier.py          # Notificaciones push asíncronas
-│   ├── macro/                            # [v2.0] Inteligencia Macroeconómica Pre-News
-│   │   ├── __init__.py
-│   │   ├── economic_calendar.py          # Calendario de eventos fundamentales y caché
-│   │   └── macro_rag_agent.py            # Pre-News Hazard Guard (-30m/+15m) y RCA Forense
-│   ├── models/                           # Modelos Predictivos y Explicabilidad
-│   │   ├── anomaly_detector.py           # LSTM Autoencoder y Gaussian HMM
-│   │   ├── arima_lstm.py                 # Híbrido ARIMA-LSTM
-│   │   ├── bilstm_model.py               # BiLSTM Bidireccional
-│   │   ├── export_champions_to_onnx.py   # [v2.0] Script de exportación masiva a ONNX
-│   │   ├── lstm_model.py                 # LSTM Recurrente
-│   │   ├── lstm_rf.py                    # Híbrido LSTM-RandomForest
-│   │   ├── onnx_exporter.py              # [v2.0] Constructor de grafos y Checksums SHA-256
-│   │   ├── random_forest.py              # Random Forest Classifier
-│   │   ├── regime_detector.py            # [v2.0] HMM 3-Estados y Test Kolmogorov-Smirnov
-│   │   └── xgb_model.py                  # XGBoost Classifier
-│   ├── preprocessing/                    # Ingeniería de Características Financieras
-│   │   ├── asset_screener.py             # Screening Fase 0 (Hurst > 0.55, Correlación < 0.40)
-│   │   ├── auditor.py                    # Auditoría de integridad de datasets
-│   │   ├── chilean_macro.py              # Exógenas macro chilenas / globales
-│   │   ├── meta_labeling.py              # Etiquetado con Triple Barrera
-│   │   ├── stationarity.py               # Diferenciación Fraccionada (FFD)
-│   │   ├── technical_features.py         # RSI, MACD, ATR, Bollinger
-│   │   └── volatility.py                 # Calibración condicional EGARCH
-│   ├── evaluation/                       # Torneo de Modelos y Asignación de Portafolio
-│   │   ├── alpha_backtester.py           # Backtester vectorizado de Alpha
-│   │   ├── cpcv_auditor.py               # Auditoría CPCV y métrica PBO
+│   ├── database/
+│   │   └── trade_vault.py                # Persistencia ACID SQLite WAL (execution_audit_log, system_state)
+│   ├── strategies/
+│   │   └── primary_strategies.py         # Capa 1: TrendPullback, DonchianBreakout, MeanReversion
+│   ├── preprocessing/
+│   │   ├── asset_screener.py             # Hurst sobre retornos + Variance Ratio Lo-MacKinlay
+│   │   ├── auditor.py                    # Auditoría de integridad y continuidad temporal
+│   │   ├── chilean_macro.py              # Exógenas macro locales/globales
+│   │   ├── cusum_filter.py               # Capa 0: Filtro CUSUM Simétrico calibrado por volatilidad
+│   │   ├── information_bars.py           # Capa 0 intradía: Tick Bars & Tick Imbalance Bars (MT5 OTC)
+│   │   ├── meta_labeling.py              # TripleBarrierLabeler + MetaBarrierLabeler ([t0, t1] por side)
+│   │   ├── sample_weights.py             # Concurrencia, unicidad media y time-decay (AFML Cap. 4)
+│   │   ├── stationarity.py               # FFD con d_map congelable (transform_with_fixed_d)
+│   │   ├── tabular_features.py           # 15–22 features causales multi-escala (sin .bfill())
+│   │   ├── technical_features.py         # MACD, RSI, ATR
+│   │   └── volatility.py                 # EGARCH(1,1) rodante con fallback a GARCH/std
+│   ├── validation/
+│   │   └── purged_cv.py                  # PurgedKFold([t0, t1]) + máscara causal Walk-Forward
+│   ├── models/
+│   │   ├── calibration.py                # PurgedPlattCalibrator + Brier/ECE
+│   │   ├── export_champions_to_onnx.py   # Exportador CLI real (sin grafos sintéticos)
+│   │   ├── meta_trainer_v3.py            # Entrenador Meta-Labeling v3.0 + exportación ONNX real
+│   │   ├── onnx_exporter.py              # Conversión skl2onnx/onnxmltools + paridad < 1e-5 + SHA-256
+│   │   ├── regime_detector.py            # HMM 3-estados + test Kolmogorov-Smirnov (KS-Drift)
+│   │   ├── anomaly_detector.py           # Autoencoder (P90/P99) y HMM legacy
+│   │   └── ...                           # Entrenadores legacy (xgb, rf, lstm, bilstm, arima_lstm, lstm_rf)
+│   ├── evaluation/
+│   │   ├── alpha_backtester.py           # Backtester causal (Open[t+1])
+│   │   ├── cpcv_auditor.py               # CSCV PBO formal (matriz T x N), DSR empírico y CPCV
+│   │   ├── feature_importance.py         # MDA Purgado Out-of-Sample por Log-Loss
 │   │   ├── hrp_optimizer.py              # Hierarchical Risk Parity
-│   │   ├── live_evaluator.py             # Auditoría de rendimiento en vivo
-│   │   └── portfolio_backtester.py       # Simulador financiero en USD y selección de campeones
-│   ├── data_extractor.py                 # Extractor histórico MT5
-│   ├── main_preprocessing.py             # Pipeline maestro de preprocesamiento incremental
-│   ├── main_training.py                  # Pipeline de optimización Bayesiana (Optuna)
-│   └── mt5_connector.py                  # Conector nativo de IPC con MetaTrader 5
-├── tests/                                # Suite Completa de 63 Pruebas Unitarias Pytest
-│   ├── conftest.py                       # Fixtures sintéticos (bullrun, crash, flat, clean)
-│   ├── test_bayesian_opt.py              # Validación de Optuna TPE sampler
-│   ├── test_cost_sensitive_gatekeeper.py # [v2.0] Hurdle rate, slippage y spreads
-│   ├── test_cpcv_auditor.py              # Combinaciones CPCV y Sharpe medio
-│   ├── test_decoupled_architecture.py    # [v2.0] Integración Gateway vs. Analytics Daemon
-│   ├── test_egarch.py                    # Volatilidad positiva y cap de sanidad
-│   ├── test_ffd.py                       # Estacionariedad y preservación de memoria
-│   ├── test_macro_rag_agent.py           # [v2.0] Ventanas pre/post news y RCA
-│   ├── test_multi_timeframe.py           # Sincronización horaria D1/H4
-│   ├── test_onnx_inference.py            # [v2.0] Inferencia C++, shapes y SHA-256
-│   ├── test_regime_detector.py           # [v2.0] HMM 3 estados y test KS de deriva
-│   ├── test_risk_manager.py              # Position sizing, Kelly y barreras
-│   ├── test_technical_features.py        # Límites de osciladores y consistencia
-│   ├── test_trade_vault.py               # [v2.0] Persistencia ACID y modo WAL SQLite
-│   └── test_triple_barrier.py            # Lógica de etiquetado de barreras
-├── results/                              # Artefactos de producción (Ignorado por Git)
-│   ├── campeon_*.json                    # Configuraciones de modelos campeones
-│   ├── saved_models/                     # Modelos (.pkl, .keras, .onnx) y onnx_manifest.json
-│   ├── trading_vault.db                  # [v2.0] Bóveda transaccional SQLite WAL
-│   └── hrp_weights.json                  # Matriz de pesos de portafolio HRP vigente
-├── requirements.txt                      # Dependencias base
-└── README.md                             # Documentación Técnica Institucional
+│   │   ├── live_evaluator.py             # Reporte HTML de rendimiento en vivo
+│   │   └── portfolio_backtester.py       # Simulador de portafolio y asignación HRP
+│   ├── execution/
+│   │   ├── analytics_daemon.py           # Worker asíncrono (Autoencoder 3-features, HRP)
+│   │   ├── cost_sensitive_gatekeeper.py  # Filtro de utilidad neta vs spread/slippage/swap
+│   │   ├── execution_engine.py           # Bridge directo a órdenes MT5
+│   │   ├── execution_gateway.py          # Gateway Fail-Closed + flujo 4 capas v3.0
+│   │   ├── main_bot_v2.py                # Orquestador (--mode dual | gateway | daemon)
+│   │   ├── onnx_inference_engine.py      # Runtime ONNX con verificación SHA-256
+│   │   ├── risk_manager.py               # Position sizing Kelly fraccional + HybridRiskMonitor
+│   │   └── telegram_notifier.py          # Alertas asíncronas
+│   ├── macro/
+│   │   ├── economic_calendar.py          # Caché JSON de eventos macro
+│   │   └── macro_rag_agent.py            # Hazard Guard (-30m/+15m) y bitácora RCA post-trade
+│   ├── data_extractor.py                 # Extractor histórico MT5 / yfinance (solo ffill causal)
+│   ├── main_preprocessing.py             # Pipeline incremental de preprocesamiento (--force)
+│   ├── main_training_v3.py               # Pipeline principal Meta-Labeling v3.0
+│   └── main_training.py                  # Pipeline legacy multi-arquitectura
+├── tests/                                # 92 pruebas unitarias y de integración (100% passing)
+├── export_to_aws.py                      # Empaquetador bot_production.zip
+├── pytest.ini                            # Configuración de pythonpath y testpaths
+└── start_bot.bat                         # Script de arranque con espera GUI MT5
 ```
 
 ---
 
-## 🛠️ Instalación y Verificación Rápida
+## 5. Instalación, Pruebas y Reproducción
 
-### 1. Clonar e Instalar Entorno Virtual
+### 5.1 Instalación y Suite de Pruebas
 ```bash
 git clone https://github.com/ronaldreighsrsc/quant-trading-bot.git
 cd quant-trading-bot
 
-# Crear y activar entorno virtual Python 3.12
 python -m venv venv
-venv\Scripts\activate       # En Windows
-# source venv/bin/activate  # En Linux/Mac
+venv\Scripts\activate       # Windows
+# source venv/bin/activate  # Linux/Mac
 
-# Instalar dependencias completas
 pip install -r requirements.txt
-```
-
-### 2. Ejecutar la Suite de Pruebas Automatizadas
-```bash
 pytest tests/ -v
 ```
-**Resultado:** **63 pruebas unitarias e integradas aprobadas al 100% (63 passed in ~95s)**:
-- `test_trade_vault.py` (4 tests): Inicialización WAL, concurrencia de hilos y auditoría.
-- `test_cost_sensitive_gatekeeper.py` (4 tests): Hurdle rate $\ge 2.5\times$, slippage estocástico y spreads.
-- `test_regime_detector.py` (5 tests): Mapeo semántico HMM 3-estados y test Kolmogorov-Smirnov ($p < 0.01$).
-- `test_macro_rag_agent.py` (6 tests): Pre-News freeze, cooldown post-news y reporte forense RCA.
-- `test_onnx_inference.py` (5 tests): Inferencia continua `float32`, verificación SHA-256 y latencia.
-- `test_decoupled_architecture.py` (3 tests): Abort O(1) en cuarentena, macro freeze y latido de vida.
-- `test_risk_manager.py`, `test_ffd.py`, `test_egarch.py`, etc. (36 tests): Métricas base de López de Prado.
+**Estado verificado:** **92 pruebas pasando (`92 passed`)**, cubriendo:
+- Paridad numérica ONNX real `< 1e-5` (LR, RF, XGBoost, LightGBM + Platt) y rechazo *fail-closed* ante checksum corrupto (`test_phase1_onnx_parity_and_p0.py`).
+- Invariancia bit-a-bit en Walk-Forward ante *Oracle Future Shock*, `PurgedKFold([t0, t1])` y Hurst sobre retornos estacionarios (`test_phase2_leakage_and_hurst.py`).
+- Filtro CUSUM causal, estrategias primarias, simetría Long/Short de `MetaBarrierLabeler` y `sample_weights` (`test_phase3_meta_labeling_and_weights.py`).
+- MDA purgado, DSR empírico, CSCV PBO formal ($T \times N$) y flujo end-to-end `MetaModelTrainerV3` → `ExecutionGateway` (`test_phase4_meta_training_mda_dsr_pbo.py`).
+- Tick Bars y Tick Imbalance Bars sobre ticks con sonrisa de volumen intradía (`test_phase5_information_bars.py`).
+- Suite base + v2.0 (`test_trade_vault.py`, `test_cost_sensitive_gatekeeper.py`, `test_regime_detector.py`, `test_macro_rag_agent.py`, `test_onnx_inference.py`, `test_decoupled_architecture.py`, `test_ffd.py`, `test_egarch.py`, `test_risk_manager.py`, `test_triple_barrier.py`, etc.).
 
-### 3. Puesta en Marcha del Bot en Producción (v2.0)
+### 5.2 Pipeline de Investigación y Entrenamiento (v3.0)
 ```bash
-# Modo Dual Unificado (Gateway en tiempo real < 15ms + Daemon Analítico MLOps)
+# 1. Extracción histórica MT5 / macro
+python src/data_extractor.py
+
+# 2. Preprocesamiento incremental (Indicadores + EGARCH + FFD)
+python src/main_preprocessing.py
+
+# 3. Entrenamiento Meta-Labeling v3.0 + MDA + DSR + CSCV PBO + ONNX real (< 1e-5)
+python src/main_training_v3.py
+
+# 4. (Opcional) Re-exportación manual de campeones a ONNX con verificación SHA-256
+python src/models/export_champions_to_onnx.py
+```
+
+### 5.3 Ejecución en Modo Dual / Gateway / Daemon
+```bash
+# Modo Dual (Gateway + Daemon MLOps en proceso secundario)
 python src/execution/main_bot_v2.py --mode dual --interval 5.0
 
-# Modo Solo Gateway (Para VPS de 1 GB RAM ultra-reducido sin TensorFlow)
+# Modo Solo Gateway (entorno ligero sin TensorFlow)
 python src/execution/main_bot_v2.py --mode gateway --interval 5.0
 
-# Modo Solo Demonio Analítico (Worker secundario de rebalanceo y Shadow Journal)
+# Modo Solo Daemon Analítico
 python src/execution/main_bot_v2.py --mode daemon
 ```
 
-### 4. Zero-Touch MLOps: Compilación Automática a ONNX & Manifiesto Criptográfico
-
-> [!TIP]
-> **Recomendación Operacional Táctica para Reentrenamiento & Producción (Zero-Touch MLOps):**  
-> Para evitar desalineaciones en producción y garantizar cero errores humanos, **unificamos ambas responsabilidades en el pipeline principal**:  
-> Siempre que ejecutes el reentrenamiento periódico de modelos con `python src/main_training.py` o el torneo de asignación de portafolio con `python src/evaluation/portfolio_backtester.py`, el sistema **compila y exporta automáticamente** los modelos campeones a formato `.onnx` en `results/saved_models/` y refresca sus firmas criptográficas en `onnx_manifest.json`.
->
-> De este modo, el flujo operativo heredado (*legacy*) no se altera y `execution_gateway.py` siempre arranca con las firmas criptográficas al día de forma 100% desatendida.
-
-Si deseas forzar una re-exportación o validación manual aislada sin reentrenar (p. ej. en un job de CI/CD o tras migrar un modelo entre servidores):
-```bash
-python src/models/export_champions_to_onnx.py
-```
-*Actualiza los archivos `.onnx` en `results/saved_models/` y calcula los checksums SHA-256 en `onnx_manifest.json`.*
-
-### 5. Reproducción del Pipeline Completo de Investigación (ETL, Optuna & Portafolio)
-```bash
-# 1. Extracción y screening nativo MT5 (Hurst > 0.55)
-python src/data_extractor.py
-
-# 2. Preprocesamiento incremental (FFD + EGARCH + Triple Barrera)
-python src/main_preprocessing.py
-
-# 3. Entrenamiento Meta-Labeling Institucional v3.0 (CUSUM + Modelo Primario + MDA + Platt + CSCV PBO + ONNX Real < 1e-5)
-python src/main_training_v3.py
-
-# (Opcional) Pipeline legacy multi-arquitectura + Optuna
-python src/main_training.py
-
-# 4. Torneo de Portafolio Financiero y Asignación HRP
-#    -> Exporta hrp_weights.json y sincroniza los grafos ONNX para Producción
-python src/evaluation/portfolio_backtester.py
-```
-
-### 6. Empaquetado Inteligente para AWS / VPS (`export_to_aws.py`)
-Genera un bundle optimizado `bot_production.zip` que incluye exclusivamente los artefactos requeridos en vivo:
-```bash
-python export_to_aws.py
-```
-*Empaqueta los modelos campeones (`.onnx`, `.pkl`, `.keras`), monitores MLOps (`results/campeon_*_autoencoder/`, `results/campeon_*_hmm.pkl`), el manifiesto criptográfico `onnx_manifest.json`, los pesos de portafolio `hrp_weights.json`, el código fuente `src/`, el script de servicio `start_bot.bat` y los requerimientos de ejecución.*
-
 ---
 
-## ☁️ Despliegue y Automatización 24/7 en Servidor AWS / EC2 / Windows VPS
+## 6. Despliegue en Windows Server (AWS EC2 / VPS)
 
-Para que el bot opere de forma ininterrumpida y sobreviva a reinicios automáticos de instancias cloud o parches de seguridad de Windows Server, **es imperativo considerar la restricción gráfica de MetaTrader 5**:
+Para operar 24/7 con MetaTrader 5 en una instancia Windows Server (AWS EC2 o VPS):
 
-> [!WARNING]
-> **Restricción de Entorno GUI de MetaTrader 5:**  
-> MetaTrader 5 requiere inicializar subsistemas gráficos de Windows para interactuar con la API nativa de IPC. Por ello, **NO** debe lanzarse como un servicio silencioso de Windows ("Session 0 Isolation"), ya que crashearía de forma inmediata al no encontrar un contexto gráfico activo.
+> **Restricción de GUI de MetaTrader 5:** MetaTrader 5 requiere sesión de escritorio gráfica activa para operar la API IPC. No debe ejecutarse como servicio silencioso de Windows (*Session 0 Isolation*).
 
-Para configurar la ejecución automática e indestructible en una instancia **AWS EC2 (Windows Server)** o VPS dedicado:
-
-### Paso 1: Configurar Auto-Login en Windows Server
-1. Abre el Símbolo del Sistema (CMD) como **Administrador** y destraba la directiva de contraseñas de Windows:
+1. **Empaquetar artefactos de producción:**
+   ```bash
+   python export_to_aws.py
+   ```
+   Genera `bot_production.zip` con `src/`, `.onnx`, `onnx_manifest.json`, `hrp_weights.json`, `requirements/`, `start_bot.bat` y configuraciones de campeones.
+2. **Habilitar Auto-Login en Windows Server** (para sobrevivir a reinicios por parches):
    ```cmd
    reg add "HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\PasswordLess\Device" /v DevicePasswordLessBuildVersion /t REG_DWORD /d 0 /f
    ```
-2. Presiona `Win + R`, escribe `netplwiz` y pulsa Enter.
-3. Desmarca la casilla *"Los usuarios deben escribir su nombre y contraseña para usar el equipo"*.
-4. Haz clic en **Aplicar**, introduce la contraseña de `Administrator` dos veces y acepta.  
-   *(Con esto, el servidor iniciará sesión automáticamente en el escritorio al encender o reiniciar).*
-
-### Paso 2: Programar la Tarea con Privilegios Elevados (`schtasks`)
-Crea la tarea programada que ejecutará el script de arranque justo cuando el escritorio cargue:
-```cmd
-schtasks /create /tn "QuantBot_Trading" /tr "C:\Users\Administrator\Desktop\quant-trading-bot\start_bot.bat" /sc onlogon /ru "Administrator" /rl highest /f
-```
-
-### Script de Arranque Resiliente (`start_bot.bat`)
-El script incorpora una pausa inicial de 60 segundos para permitir que MetaTrader 5 y los servicios de red sincronicen su conexión con el broker antes de invocar el orquestador institucional en modo dual:
-```bat
-@echo off
-:: Script de arranque del QuantBot - AWS Production (v2.0 Dual Mode)
-title QuantBot v2.0 - Sistema de Trading Cuantitativo Institucional
-
-:: Esperar 60 segundos para que MetaTrader 5 termine de cargar al inicio
-timeout /t 60 /nobreak
-
-:: Activar el entorno virtual y arrancar el bot en modo dual
-cd /d C:\Users\Administrator\Desktop\quant-trading-bot
-call venv\Scripts\activate.bat
-python src\execution\main_bot_v2.py --mode dual --interval 5.0
-
-:: Si el bot muere, esperar 30 segundos y reiniciar automaticamente
-:restart
-echo Bot detenido. Reiniciando en 30 segundos...
-timeout /t 30 /nobreak
-python src\execution\main_bot_v2.py --mode dual --interval 5.0
-goto restart
-```
+   Luego ejecutar `netplwiz` (`Win + R`) y desmarcar *"Los usuarios deben escribir su nombre y contraseña para usar el equipo"*.
+3. **Crear tarea programada `onlogon`** apuntando a [`start_bot.bat`](start_bot.bat) (espera 60s a que cargue MT5 y reinicia ante caídas):
+   ```cmd
+   schtasks /create /tn "QuantBot_Trading" /tr "C:\Users\Administrator\Desktop\quant-trading-bot\start_bot.bat" /sc onlogon /ru "Administrator" /rl highest /f
+   ```
 
 ---
 
-## 📅 Calendario de Mantenimiento MLOps Institucional
+## 7. Auditoría y Mantenimiento MLOps
 
-Para asegurar una operación libre de drift y sin confusión de roles operativos, sigue esta cadencia recomendada:
-
-| Fase MLOps | Frecuencia Recomendada | Script a Ejecutar | Parámetro / Detalle Clave | Qué hace / Qué genera |
-| :--- | :--- | :--- | :--- | :--- |
-| **1. Refresco de Datos** | Mensual | `python src/data_extractor.py`<br>`python src/main_preprocessing.py` | N/A | Descarga velas MT5 recientes y actualiza matrices con FFD y EGARCH en `data/processed/*.csv`. |
-| **2. Reentrenamiento de Modelos** | Semestral / Anual | `python src/main_training.py` | N/A | Optimización Bayesiana Optuna. **Auto-compila a ONNX con firmas SHA-256 en `onnx_manifest.json` (Zero-Touch MLOps).** |
-| **3. Monitores MLOps & Torneo** | Semestral / Tras Paso 2 | `python src/evaluation/portfolio_backtester.py` | `fast_mode=False` (~1 h) | Entrena detectores HMM, Autoencoders de anomalías y sincroniza los grafos `.onnx` para producción. |
-| **4. Auditoría de Robustez PBO** | Trimestral / Tras Paso 2 | `python src/evaluation/cpcv_auditor.py` | N/A | Evalúa $\binom{6}{2}=15$ caminos combinatorios CPCV certificando $PBO < 5\%$. |
-| **5. Rebalanceo de Pesos HRP** | Mensual (ej. día 1) | `python src/evaluation/portfolio_backtester.py` | `fast_mode=True` (~2 min) | Recalcula la matriz HRP con Shrinkage Sharpe rodante y actualiza `results/hrp_weights.json`. |
-| **6. Empaquetado Producción** | Tras Paso 2 o 5 | `python export_to_aws.py` | N/A | Genera el bundle `bot_production.zip` listo para desplegar en la instancia AWS / VPS. |
-| **7. Operativa en Vivo 24/7** | Continua (Mercado Abierto) | `python src/execution/main_bot_v2.py --mode dual` | `--interval 5.0` | Ejecución en ultra-baja latencia (< 15 ms), Shadow Journal asíncrono y auditoría SQLite WAL. |
+| Tarea | Frecuencia | Comando | Propósito |
+| :--- | :--- | :--- | :--- |
+| Refresco de datos | Mensual | `python src/data_extractor.py && python src/main_preprocessing.py` | Actualiza velas MT5 y features causales |
+| Reentrenamiento y auditoría v3.0 | Semestral / Anual | `python src/main_training_v3.py` | Reentrena Meta-Modelo, valida CSCV PBO / DSR y exporta ONNX real |
+| Rebalanceo HRP | Mensual | `python src/evaluation/portfolio_backtester.py` | Actualiza `results/hrp_weights.json` |
+| Auditoría de trades en vivo | Bajo demanda | `python src/evaluation/live_evaluator.py` | Genera `results/live_production_report.html` |
+| Consulta directa SQLite WAL | Bajo demanda | `sqlite3 results/trading_vault.db "SELECT timestamp_utc, symbol, signal_direction, hurdle_ratio, status FROM execution_audit_log ORDER BY id DESC LIMIT 10;"` | Inspección transaccional sin bloquear ejecución |
+| Tracking de experimentos | Bajo demanda | `mlflow ui` | Visualización de corridas en `http://127.0.0.1:5000` |
 
 ---
 
-## 📓 Auditoría de Producción en Vivo & Dashboards
-
-### 1. Evaluador de Rendimiento en Vivo (`src/evaluation/live_evaluator.py`)
-Permite auditar el desempeño financiero real del bot en caliente sin depender exclusivamente de los reportes del broker:
-```bash
-python src/evaluation/live_evaluator.py
-```
-Genera un informe interactivo HTML en `results/live_production_report.html` con:
-- Equidad y Balance en tiempo real.
-- Retorno sobre la Inversión (ROI) y Sharpe Ratio en vivo.
-- Máximo Drawdown real vs. Drawdown proyectado por Monte Carlo.
-- Historial detallado de operaciones cerradas y tasa de acierto (Win Rate).
-
-### 2. Consultas Forenses en la Bóveda Transaccional (`results/trading_vault.db`)
-Gracias al modo SQLite Write-Ahead Logging (WAL), puedes consultar la base de datos en caliente sin bloquear la ejecución del bot:
-```bash
-sqlite3 results/trading_vault.db "SELECT timestamp_utc, symbol, signal_direction, expected_utility, estimated_friction, hurdle_ratio, status FROM execution_audit_log ORDER BY id DESC LIMIT 10;"
-```
-
-### 3. Dashboard MLflow (Experiment Tracking & Model Registry)
-Visualiza el historial completo de entrenamientos, torneos y métricas CPCV:
-```bash
-mlflow ui
-```
-Disponible en `http://127.0.0.1:5000` con tracking de parámetros de Optuna, curvas de aprendizaje, matrices de confusión y artefactos exportados.
-
----
-
-## 📜 Licencia
-- **Autor:** Ronald Solares (Ingeniero Civil Industrial — Data, MLOps & Quantitative Systems).
-- **Licencia:** Distribuido bajo Licencia MIT. Consulta [LICENSE](LICENSE) para más detalles.
-
-
+## Licencia
+- **Autor:** Ronald Solares — Ingeniero Civil Industrial.
+- **Licencia:** MIT ([LICENSE](LICENSE)).
