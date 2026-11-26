@@ -145,6 +145,159 @@ def build_tick_imbalance_bars(
     return pd.DataFrame(rows)
 
 
+def filter_liquid_session_ticks(
+    ticks_df: pd.DataFrame,
+    start_hour_utc: int = 7,
+    end_hour_utc: int = 17,
+    time_col: str = "time",
+) -> pd.DataFrame:
+    """
+    Filtra ticks pertenecientes únicamente a sesiones líquidas institucionales
+    (por defecto 07:00–17:00 UTC: apertura Londres hasta solapamiento Londres/NY),
+    excluyendo rollover nocturno de baja liquidez y spreads anchos.
+    """
+    if ticks_df.empty:
+        return ticks_df.copy()
+
+    df = ticks_df.copy()
+    if time_col in df.columns:
+        ts = pd.to_datetime(df[time_col])
+    else:
+        ts = pd.to_datetime(df.index)
+
+    hours = ts.dt.hour
+    if start_hour_utc <= end_hour_utc:
+        mask = (hours >= start_hour_utc) & (hours < end_hour_utc)
+    else:
+        mask = (hours >= start_hour_utc) | (hours < end_hour_utc)
+    return df.loc[mask.values].reset_index(drop=True)
+
+
+def build_tick_imbalance_bars_with_microstructure(
+    ticks_df: pd.DataFrame,
+    expected_init_t: int = 200,
+    ewma_span: int = 20,
+    min_ticks: int = 20,
+    max_ticks: int = 2000,
+    price_col: str = "price",
+) -> pd.DataFrame:
+    """
+    Versión enriquecida de Tick Imbalance Bars que preserva también duración,
+    conteo exacto de ticks positivos/negativos y spread real bid/ask para VPIN.
+    """
+    if ticks_df.empty:
+        return pd.DataFrame(
+            columns=["time", "open", "high", "low", "close", "tick_volume", "imbalance", "pos_ticks", "neg_ticks", "duration_sec", "spread_close"]
+        )
+
+    times, prices = _extract_tick_arrays(ticks_df, price_col=price_col)
+    has_spread = ("bid" in ticks_df.columns) and ("ask" in ticks_df.columns)
+    spreads = (ticks_df["ask"].astype(float).values - ticks_df["bid"].astype(float).values) if has_spread else np.zeros(len(prices))
+
+    n = len(prices)
+    if n < min_ticks:
+        return pd.DataFrame(
+            columns=["time", "open", "high", "low", "close", "tick_volume", "imbalance", "pos_ticks", "neg_ticks", "duration_sec", "spread_close"]
+        )
+
+    b = _tick_rule_signs(prices)
+    alpha = 2.0 / (ewma_span + 1.0)
+    ewma_t = float(expected_init_t)
+    ewma_b_pos_prob = 0.55
+
+    rows = []
+    bar_start = 0
+    theta = 0.0
+    pos_ticks = 0
+
+    for i in range(n):
+        theta += float(b[i])
+        if b[i] > 0:
+            pos_ticks += 1
+        bar_len = i - bar_start + 1
+
+        exp_imbalance = max(0.05, abs(2.0 * ewma_b_pos_prob - 1.0))
+        threshold = ewma_t * exp_imbalance
+
+        if (bar_len >= min_ticks and abs(theta) >= threshold) or (bar_len >= max_ticks):
+            chunk_p = prices[bar_start : i + 1]
+            dt_sec = float((pd.Timestamp(times[i]) - pd.Timestamp(times[bar_start])).total_seconds())
+            rows.append({
+                "time": times[i],
+                "open": float(chunk_p[0]),
+                "high": float(np.max(chunk_p)),
+                "low": float(np.min(chunk_p)),
+                "close": float(chunk_p[-1]),
+                "tick_volume": int(bar_len),
+                "imbalance": float(theta),
+                "pos_ticks": int(pos_ticks),
+                "neg_ticks": int(bar_len - pos_ticks),
+                "duration_sec": max(dt_sec, 1e-3),
+                "spread_close": float(spreads[i]),
+            })
+
+            ewma_t = (1.0 - alpha) * ewma_t + alpha * float(bar_len)
+            bar_pos_prob = pos_ticks / float(bar_len)
+            ewma_b_pos_prob = (1.0 - alpha) * ewma_b_pos_prob + alpha * bar_pos_prob
+
+            bar_start = i + 1
+            theta = 0.0
+            pos_ticks = 0
+
+    return pd.DataFrame(rows)
+
+
+def compute_tick_microstructure_features(
+    bars_df: pd.DataFrame,
+    vpin_buckets: int = 20,
+    z_window: int = 50,
+) -> pd.DataFrame:
+    """
+    Calcula features microestructurales 100% causales sobre Information Bars / TIBs:
+    - `tick_imbalance_norm`: (pos - neg) / N_ticks ∈ [-1, 1]
+    - `vpin_proxy`: promedio móvil sobre los últimos `vpin_buckets` de |pos - neg| / (pos + neg)
+    - `spread_zscore`: z-score causal (window=`z_window`) del spread de cierre
+    - `tick_arrival_rate`: ticks/seg respecto a su mediana móvil causal de `z_window` barras
+    """
+    out = bars_df.copy()
+    if out.empty:
+        return out
+
+    tick_vol = out["tick_volume"].astype(float).replace(0.0, np.nan)
+    if "imbalance" in out.columns:
+        imb = out["imbalance"].astype(float)
+        out["tick_imbalance_norm"] = (imb / tick_vol).clip(-1.0, 1.0)
+        abs_imb_ratio = (imb.abs() / tick_vol).clip(0.0, 1.0)
+    elif "pos_ticks" in out.columns and "neg_ticks" in out.columns:
+        pos = out["pos_ticks"].astype(float)
+        neg = out["neg_ticks"].astype(float)
+        denom = (pos + neg).replace(0.0, np.nan)
+        out["tick_imbalance_norm"] = ((pos - neg) / denom).clip(-1.0, 1.0)
+        abs_imb_ratio = ((pos - neg).abs() / denom).clip(0.0, 1.0)
+    else:
+        out["tick_imbalance_norm"] = 0.0
+        abs_imb_ratio = pd.Series(0.0, index=out.index)
+
+    out["vpin_proxy"] = abs_imb_ratio.rolling(vpin_buckets, min_periods=min(5, vpin_buckets)).mean()
+
+    if "spread_close" in out.columns:
+        sp = out["spread_close"].astype(float)
+        sp_mean = sp.rolling(z_window, min_periods=min(10, z_window)).mean()
+        sp_std = sp.rolling(z_window, min_periods=min(10, z_window)).std().replace(0.0, np.nan)
+        out["spread_zscore"] = ((sp - sp_mean) / sp_std).fillna(0.0)
+    else:
+        out["spread_zscore"] = 0.0
+
+    if "duration_sec" in out.columns:
+        raw_rate = tick_vol / out["duration_sec"].astype(float).clip(lower=1e-3)
+        med_rate = raw_rate.rolling(z_window, min_periods=min(10, z_window)).median().shift(1).replace(0.0, np.nan)
+        out["tick_arrival_rate"] = (raw_rate / med_rate).replace([np.inf, -np.inf], np.nan).fillna(1.0)
+    else:
+        out["tick_arrival_rate"] = 1.0
+
+    return out
+
+
 def compare_normality_vs_time_bars(
     time_bar_returns: np.ndarray,
     info_bar_returns: np.ndarray,

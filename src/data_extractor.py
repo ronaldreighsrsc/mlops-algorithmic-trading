@@ -237,6 +237,63 @@ class DataExtractor:
         df_new.to_csv(file_path, index=False)
         logging.info(f"Datos guardados exitosamente en: {file_path}")
 
+    def extract_ticks_chunked(
+        self,
+        symbol: str,
+        start_date: datetime,
+        end_date: datetime,
+        chunk_days: int = 30,
+        out_path: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Descarga ticks crudos (bid, ask, time_msc) en bloques temporales desde MT5
+        y los persiste en Parquet para construcción de Tick Bars / TIBs / VPIN.
+        """
+        if not mt5.symbol_select(symbol, True):
+            logging.error(f"Fallo al seleccionar símbolo {symbol} para descarga de ticks.")
+            return pd.DataFrame()
+
+        all_ticks = []
+        curr_start = start_date
+        while curr_start < end_date:
+            curr_end = min(end_date, curr_start + dt.timedelta(days=chunk_days))
+            ticks = mt5.copy_ticks_range(symbol, curr_start, curr_end, mt5.COPY_TICKS_ALL)
+            if ticks is not None and len(ticks) > 0:
+                all_ticks.append(pd.DataFrame(ticks))
+            curr_start = curr_end + dt.timedelta(milliseconds=1)
+            time.sleep(0.05)
+
+        if not all_ticks:
+            logging.warning(f"No se obtuvieron ticks para {symbol} entre {start_date} y {end_date}.")
+            return pd.DataFrame()
+
+        df_ticks = pd.concat(all_ticks, ignore_index=True)
+        if "time_msc" in df_ticks.columns:
+            df_ticks["time"] = pd.to_datetime(df_ticks["time_msc"], unit="ms", utc=True).dt.tz_localize(None)
+            df_ticks = df_ticks.drop_duplicates(subset=["time_msc"]).sort_values("time_msc")
+        elif "time" in df_ticks.columns:
+            df_ticks["time"] = pd.to_datetime(df_ticks["time"], unit="s", utc=True).dt.tz_localize(None)
+            df_ticks = df_ticks.sort_values("time")
+
+        if "bid" in df_ticks.columns and "ask" in df_ticks.columns:
+            df_ticks["price"] = 0.5 * (df_ticks["bid"].astype(float) + df_ticks["ask"].astype(float))
+
+        keep_cols = [c for c in ("time", "time_msc", "bid", "ask", "price", "last", "volume", "flags") if c in df_ticks.columns]
+        df_ticks = df_ticks[keep_cols].reset_index(drop=True)
+
+        if out_path is None:
+            ticks_dir = os.path.join(self.raw_dir, "ticks")
+            os.makedirs(ticks_dir, exist_ok=True)
+            out_path = os.path.join(ticks_dir, f"{symbol}_ticks.parquet")
+
+        os.makedirs(os.path.dirname(os.path.abspath(out_path)), exist_ok=True)
+        if out_path.endswith(".parquet"):
+            df_ticks.to_parquet(out_path, index=False)
+        else:
+            df_ticks.to_csv(out_path, index=False)
+        logging.info(f"✅ Ticks de {symbol} guardados en {out_path} ({len(df_ticks)} ticks).")
+        return df_ticks
+
 if __name__ == "__main__":
     from preprocessing.asset_screener import AssetScreener
     
