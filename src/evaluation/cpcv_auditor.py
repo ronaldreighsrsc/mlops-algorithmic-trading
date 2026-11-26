@@ -324,12 +324,16 @@ class CPCVAuditor:
             M_is = M[is_idx, :]
             M_oos = M[oos_idx, :]
 
-            # Sharpe por columna en IS y OOS
+            # Sharpe por columna en IS y OOS (sin warnings si std == 0)
             is_std = np.std(M_is, axis=0, ddof=1)
-            is_sr = np.where(is_std > 1e-12, np.mean(M_is, axis=0) / is_std * np.sqrt(252.0), -1e9)
+            is_mean = np.mean(M_is, axis=0)
+            is_sr = np.full(N, -1e9, dtype=np.float64)
+            np.divide(is_mean * np.sqrt(252.0), is_std, out=is_sr, where=is_std > 1e-12)
 
             oos_std = np.std(M_oos, axis=0, ddof=1)
-            oos_sr = np.where(oos_std > 1e-12, np.mean(M_oos, axis=0) / oos_std * np.sqrt(252.0), 0.0)
+            oos_mean = np.mean(M_oos, axis=0)
+            oos_sr = np.zeros(N, dtype=np.float64)
+            np.divide(oos_mean * np.sqrt(252.0), oos_std, out=oos_sr, where=oos_std > 1e-12)
 
             n_star = int(np.argmax(is_sr))
             sr_is_star = float(is_sr[n_star])

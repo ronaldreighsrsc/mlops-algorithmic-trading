@@ -84,6 +84,7 @@ class MetaModelTrainerV3:
         decay_c: float = 0.5,
         enable_mda_pruning: bool = True,
         min_dsr_gate: float = 0.0,
+        candidate_names: Optional[Tuple[str, ...]] = None,
         random_state: int = 42,
     ):
         self.symbol = symbol
@@ -101,6 +102,7 @@ class MetaModelTrainerV3:
         self.decay_c = float(decay_c)
         self.enable_mda_pruning = bool(enable_mda_pruning)
         self.min_dsr_gate = float(min_dsr_gate)
+        self.candidate_names = candidate_names
         self.random_state = int(random_state)
 
     def _build_candidate_factories(self, avg_uniqueness: float) -> Dict[str, Callable[[], Pipeline]]:
@@ -108,7 +110,7 @@ class MetaModelTrainerV3:
         rf_max_samples = float(np.clip(avg_uniqueness, 0.2, 0.95))
         rs = self.random_state
 
-        return {
+        all_factories = {
             "LOGISTIC_L2": lambda: Pipeline([
                 ("imputer", SimpleImputer(strategy="median")),
                 ("scaler", StandardScaler()),
@@ -160,6 +162,9 @@ class MetaModelTrainerV3:
                 )),
             ]),
         }
+        if self.candidate_names:
+            return {k: all_factories[k] for k in self.candidate_names if k in all_factories}
+        return all_factories
 
     def prepare_meta_dataset(
         self,
@@ -488,3 +493,331 @@ class MetaModelTrainerV3:
                 for k, v in candidate_results.items()
             },
         }
+
+
+def run_preregistered_v31_tournament(
+    symbol: str,
+    df: pd.DataFrame,
+    primaries: List[BasePrimaryStrategy],
+    results_dir: str,
+    candidate_names: Tuple[str, ...] = ("LOGISTIC_L2", "RANDOM_FOREST"),
+    cusum_kappa: float = 1.0,
+    k_up: float = 2.0,
+    k_down: float = 1.5,
+    max_hold: int = 10,
+    round_trip_cost: float = 0.0002,
+    hurdle_multiplier: float = 2.5,
+    train_ratio: float = 0.70,
+    enable_mda_pruning: bool = True,
+    ffd_d_map: Optional[Dict[str, float]] = None,
+    export_onnx: bool = True,
+    random_state: int = 42,
+) -> Dict[str, Any]:
+    """
+    Protocolo Experimental Cerrado v3.1 (SPEC_QUANT_V3_1_ALPHA_SIGNALS §3):
+    - Evalúa un presupuesto pre-registrado fijo de P primarias × M modelos tabulares
+      (por defecto 3 x 2 = 6 ensayos totales).
+    - Usa un corte cronológico fijo `train_ratio=0.70` compartido entre todas las
+      primarias para que el Holdout OOS (30%) y la matriz CSCV T x N estén exactamente
+      alineados en el tiempo.
+    - Selecciona al ganador por MENOR CV Log-Loss purgado en Desarrollo (cero snooping OOS).
+    - Evalúa 5 compuertas institucionales obligatorias antes de aprobar despliegue real.
+    """
+    if len(df) < 250:
+        raise ValueError(f"[{symbol}] Historia insuficiente para torneo v3.1 ({len(df)} barras).")
+
+    split_bar_idx = int(len(df) * train_ratio)
+    time_col_vals = pd.to_datetime(df["time"]).values if "time" in df.columns else df.index.values
+    holdout_start_time = time_col_vals[split_bar_idx]
+
+    p_threshold = compute_analytical_probability_threshold(
+        k_up=k_up,
+        k_down=k_down,
+        hurdle_multiplier=hurdle_multiplier,
+    )
+
+    n_bars = len(df)
+    bar_aligned_return_cols: List[np.ndarray] = []
+    holdout_sharpes_non_ann: List[float] = []
+    trial_records: List[Dict[str, Any]] = []
+
+    for prim in primaries:
+        trainer = MetaModelTrainerV3(
+            symbol=symbol,
+            primary_strategy=prim,
+            cusum_kappa=cusum_kappa,
+            k_up=k_up,
+            k_down=k_down,
+            max_hold=max_hold,
+            round_trip_cost=round_trip_cost,
+            hurdle_multiplier=hurdle_multiplier,
+            n_splits=5,
+            pct_embargo=0.01,
+            enable_mda_pruning=enable_mda_pruning,
+            candidate_names=candidate_names,
+            random_state=random_state,
+        )
+        events_df, X_events, weights, avg_u = trainer.prepare_meta_dataset(df)
+        if events_df.empty:
+            continue
+
+        t0_vals = pd.to_datetime(events_df["t0"]).values
+        t1_vals = pd.to_datetime(events_df["t1"]).values
+        train_mask = (t0_vals < holdout_start_time) & (t1_vals < holdout_start_time)
+        oos_mask = t0_vals >= holdout_start_time
+
+        train_idx = np.where(train_mask)[0]
+        oos_idx = np.where(oos_mask)[0]
+        if len(train_idx) < 35 or len(oos_idx) < 10:
+            logger.warning(
+                f"[{symbol} | {prim.name}] Omitida por insuficiencia de eventos "
+                f"(train={len(train_idx)}, oos={len(oos_idx)})."
+            )
+            continue
+
+        X_tr_df = X_events.iloc[train_idx].reset_index(drop=True)
+        y_tr = events_df["meta_label"].iloc[train_idx].values.astype(np.int32)
+        w_tr = weights[train_idx]
+        t0_tr = events_df["t0"].iloc[train_idx].reset_index(drop=True)
+        t1_tr = events_df["t1"].iloc[train_idx].reset_index(drop=True)
+
+        X_oos_df = X_events.iloc[oos_idx].reset_index(drop=True)
+        y_oos = events_df["meta_label"].iloc[oos_idx].values.astype(np.int32)
+        ret_oos = events_df["net_ret"].iloc[oos_idx].values.astype(np.float64)
+
+        mean_u = float(np.mean(avg_u[train_idx]))
+        selected_features = list(X_tr_df.columns)
+        if enable_mda_pruning and len(selected_features) > 6 and len(np.unique(y_tr)) >= 2:
+            rf_factory = trainer._build_candidate_factories(mean_u)["RANDOM_FOREST"]
+            mda_df = compute_purged_mda(
+                pipeline_factory=rf_factory,
+                X_df=X_tr_df,
+                y=y_tr,
+                t0=t0_tr,
+                t1=t1_tr,
+                sample_weights=w_tr,
+                n_splits=4,
+                pct_embargo=0.01,
+                n_repeats=2,
+                random_state=random_state,
+            )
+            selected_features = prune_noise_features(mda_df, min_importance=0.0, min_features=min(6, len(X_tr_df.columns)))
+
+        X_tr_sel = X_tr_df[selected_features].values.astype(np.float32)
+        X_oos_sel = X_oos_df[selected_features].values.astype(np.float32)
+
+        cv = PurgedKFold(n_splits=min(5, max(2, len(train_idx) // 15)), pct_embargo=0.01)
+        factories = trainer._build_candidate_factories(mean_u)
+
+        for model_name, factory in factories.items():
+            oof_raw_probs = np.full(len(y_tr), np.nan, dtype=np.float64)
+            fold_losses = []
+
+            for f_tr, f_val in cv.split(t0_tr, t1_tr):
+                if len(f_tr) < 15 or len(f_val) < 3 or len(np.unique(y_tr[f_tr])) < 2:
+                    continue
+                pipe_cv = trainer._fit_pipeline_weighted(factory(), X_tr_sel[f_tr], y_tr[f_tr], w_tr[f_tr])
+                p_val = np.clip(pipe_cv.predict_proba(X_tr_sel[f_val])[:, 1], 1e-6, 1.0 - 1e-6)
+                oof_raw_probs[f_val] = p_val
+                if len(np.unique(y_tr[f_val])) >= 2:
+                    fold_losses.append(float(log_loss(y_tr[f_val], p_val, sample_weight=w_tr[f_val], labels=[0, 1])))
+
+            valid_oof = ~np.isnan(oof_raw_probs)
+            calibrator = PurgedPlattCalibrator()
+            if np.sum(valid_oof) >= 15 and len(np.unique(y_tr[valid_oof])) >= 2:
+                calibrator.fit(oof_raw_probs[valid_oof], y_tr[valid_oof], sample_weight=w_tr[valid_oof])
+
+            master_pipe = trainer._fit_pipeline_weighted(factory(), X_tr_sel, y_tr, w_tr)
+            oos_cal = calibrator.transform(master_pipe.predict_proba(X_oos_sel)[:, 1])
+
+            brier_oos, ece_oos = compute_brier_and_ece(y_oos, oos_cal)
+            ll_oos = float(log_loss(y_oos, np.clip(oos_cal, 1e-6, 1.0 - 1e-6), labels=[0, 1])) if len(np.unique(y_oos)) >= 2 else brier_oos
+            cv_ll = float(np.mean(fold_losses)) if fold_losses else ll_oos
+
+            # Construir vector de retornos alineado en la grilla exacta de T barras de df
+            bar_rets = np.zeros(n_bars, dtype=np.float64)
+            tr_probs = calibrator.transform(np.where(valid_oof, oof_raw_probs, 0.5))
+            for pos_in_tr, idx_ev in enumerate(train_idx):
+                if tr_probs[pos_in_tr] >= p_threshold:
+                    exit_bar = int(events_df["t1_pos"].iloc[idx_ev])
+                    if 0 <= exit_bar < n_bars:
+                        bar_rets[exit_bar] += float(events_df["net_ret"].iloc[idx_ev])
+
+            taken_oos = oos_cal >= p_threshold
+            for pos_in_oos, idx_ev in enumerate(oos_idx):
+                if taken_oos[pos_in_oos]:
+                    exit_bar = int(events_df["t1_pos"].iloc[idx_ev])
+                    if 0 <= exit_bar < n_bars:
+                        bar_rets[exit_bar] += float(events_df["net_ret"].iloc[idx_ev])
+
+            holdout_bar_rets = bar_rets[split_bar_idx:]
+            std_h = float(np.std(holdout_bar_rets, ddof=1)) if len(holdout_bar_rets) > 1 else 0.0
+            mean_h = float(np.mean(holdout_bar_rets))
+            sr_h_non_ann = (mean_h / std_h) if std_h > 1e-12 else 0.0
+            sr_h_ann = sr_h_non_ann * float(np.sqrt(252.0))
+
+            bar_aligned_return_cols.append(bar_rets)
+            holdout_sharpes_non_ann.append(sr_h_non_ann)
+
+            trial_records.append({
+                "trial_id": f"{prim.name}__{model_name}",
+                "primary": prim,
+                "primary_name": prim.name,
+                "model_name": model_name,
+                "pipeline": master_pipe,
+                "calibrator": calibrator,
+                "selected_features": selected_features,
+                "X_parity_sample": X_oos_sel[: min(200, len(X_oos_sel))],
+                "cv_log_loss": cv_ll,
+                "oos_log_loss": ll_oos,
+                "brier_oos": brier_oos,
+                "ece_oos": ece_oos,
+                "oos_taken_trades": int(np.sum(taken_oos)),
+                "oos_total_events": int(len(oos_cal)),
+                "oos_net_sharpe": sr_h_ann,
+                "holdout_bar_rets": holdout_bar_rets,
+                "avg_uniqueness": mean_u,
+            })
+
+    if not trial_records:
+        raise ValueError(f"[{symbol}] Ningún ensayo del torneo v3.1 tuvo eventos suficientes.")
+
+    # Benchmark pasivo / SMA-200 sobre el MISMO bloque Holdout [split_bar_idx:]
+    closes = df["close"].astype(float).values
+    holdout_mkt_rets = np.diff(closes[split_bar_idx - 1 :]) / np.maximum(closes[split_bar_idx - 1 : -1], 1e-12)
+    sma200 = pd.Series(closes).rolling(200, min_periods=50).mean().values
+    # Regla causal Long-Cash en Holdout: close[t-1] > sma200[t-1]
+    sma_sig = np.where(
+        (~np.isnan(sma200[split_bar_idx - 1 : -1])) & (closes[split_bar_idx - 1 : -1] > sma200[split_bar_idx - 1 : -1]),
+        1.0,
+        0.0,
+    )
+    holdout_sma_rets = holdout_mkt_rets * sma_sig
+
+    def _ann_sharpe(arr: np.ndarray) -> float:
+        s = float(np.std(arr, ddof=1)) if len(arr) > 1 else 0.0
+        return float((np.mean(arr) / s) * np.sqrt(252.0)) if s > 1e-12 else 0.0
+
+    bench_bh_sharpe = _ann_sharpe(holdout_mkt_rets)
+    bench_sma_sharpe = _ann_sharpe(holdout_sma_rets)
+    benchmark_sharpe = max(bench_bh_sharpe, bench_sma_sharpe)
+
+    # CSCV PBO formal sobre matriz T x N alineada entre todos los ensayos
+    auditor = CPCVAuditor(symbol=f"{symbol}_v31", results_dir=results_dir)
+    if len(bar_aligned_return_cols) >= 2:
+        cscv_matrix = np.column_stack(bar_aligned_return_cols)
+        cscv_res = auditor.audit_cscv_pbo(cscv_matrix, n_blocks=8, purge_bars=min(max_hold, 5))
+    else:
+        cscv_res = {"pbo": 1.0, "n_combinations": 0, "n_strategies": len(bar_aligned_return_cols)}
+
+    # Seleccionar ganador estrictamente por MENOR CV Log-Loss dentro del 70% Desarrollo
+    winner = min(trial_records, key=lambda r: r["cv_log_loss"])
+    dsr_info = auditor.compute_deflated_sharpe_ratio(
+        returns=winner["holdout_bar_rets"],
+        n_trials=len(trial_records),
+        trial_sharpes=np.asarray(holdout_sharpes_non_ann, dtype=np.float64),
+    )
+
+    # 5 Compuertas Institucionales de Aceptación (SPEC v3.1 §3)
+    gates = {
+        "oos_log_loss_lt_067": bool(winner["oos_log_loss"] < 0.67),
+        "oos_ece_lt_005": bool(winner["ece_oos"] < 0.05),
+        "dsr_ge_095": bool(dsr_info["dsr"] >= 0.95),
+        "cscv_pbo_lt_020": bool(cscv_res["pbo"] < 0.20),
+        "sharpe_gt_benchmark": bool(winner["oos_net_sharpe"] > benchmark_sharpe),
+    }
+    gate_approved = all(gates.values())
+
+    # Exportación ONNX real verificada (< 1e-5)
+    models_dir = os.path.join(results_dir, "saved_models")
+    os.makedirs(models_dir, exist_ok=True)
+    bundle_filename = f"meta_{winner['model_name'].lower()}_{symbol}_v31.pkl"
+    onnx_filename = f"meta_{winner['model_name'].lower()}_{symbol}_v31.onnx"
+    bundle_path = os.path.join(models_dir, bundle_filename)
+    onnx_path = os.path.join(models_dir, onnx_filename)
+
+    joblib.dump(
+        {
+            "pipeline": winner["pipeline"],
+            "calibrator": winner["calibrator"].to_dict(),
+            "feature_order": winner["selected_features"],
+            "X_parity_sample": winner["X_parity_sample"],
+        },
+        bundle_path,
+    )
+
+    sha256, max_diff = "", 0.0
+    if export_onnx and len(winner["X_parity_sample"]) > 0:
+        _, sha256, max_diff = export_sklearn_pipeline_to_onnx(
+            pipeline=winner["pipeline"],
+            output_path=onnx_path,
+            X_parity_sample=winner["X_parity_sample"],
+            calibrator=winner["calibrator"],
+            max_parity_tol=1e-5,
+        )
+        update_onnx_manifest(models_dir)
+
+    bundle_cfg = {
+        "schema_version": "3.1",
+        "activo": symbol,
+        "timeframe": "D1",
+        "primary_strategy": {
+            "name": winner["primary_name"],
+            "params": winner["primary"].get_params(),
+        },
+        "cusum_config": {"kappa": cusum_kappa, "vol_col": "EGARCH_Vol"},
+        "ffd_d_map": ffd_d_map or {},
+        "meta_model": {
+            "model_type": f"{winner['model_name']}_CALIBRATED",
+            "bundle_pkl": bundle_filename,
+            "onnx_file": onnx_filename,
+            "sha256": sha256,
+            "onnx_parity_max_diff": max_diff,
+            "feature_order": winner["selected_features"],
+            "includes_scaler_in_onnx": True,
+            "calibration_method": "purged_platt_logit",
+            "analytical_prob_threshold": round(p_threshold, 4),
+            "n_trials_preregistered": len(trial_records),
+            "cv_log_loss": round(winner["cv_log_loss"], 5),
+            "oos_log_loss": round(winner["oos_log_loss"], 5),
+            "brier_score_oos": round(winner["brier_oos"], 5),
+            "ece_oos": round(winner["ece_oos"], 5),
+            "oos_net_sharpe": round(winner["oos_net_sharpe"], 4),
+            "benchmark_sharpe": round(benchmark_sharpe, 4),
+            "dsr_oos": round(float(dsr_info["dsr"]), 5),
+            "pbo_cscv": round(float(cscv_res["pbo"]), 5),
+            "gates": gates,
+            "gate_approved": gate_approved,
+            "avg_sample_uniqueness": round(winner["avg_uniqueness"], 4),
+        },
+        "barriers": {"k_up": k_up, "k_down": k_down, "max_hold": max_hold},
+        "risk": {"optimal_risk_pct": 0.015, "kill_switch_mdd": -0.20, "hurdle_multiplier": hurdle_multiplier},
+    }
+
+    cfg_path = os.path.join(results_dir, f"campeon_{symbol}_v31.json")
+    with open(cfg_path, "w", encoding="utf-8") as f:
+        json.dump(bundle_cfg, f, indent=4)
+
+    return {
+        "symbol": symbol,
+        "winner_trial": winner["trial_id"],
+        "gate_approved": gate_approved,
+        "gates": gates,
+        "model_bundle": bundle_cfg,
+        "cscv": cscv_res,
+        "dsr": dsr_info,
+        "trials_table": [
+            {
+                "trial_id": r["trial_id"],
+                "n_features": len(r["selected_features"]),
+                "cv_log_loss": round(r["cv_log_loss"], 5),
+                "oos_log_loss": round(r["oos_log_loss"], 5),
+                "brier_oos": round(r["brier_oos"], 5),
+                "ece_oos": round(r["ece_oos"], 5),
+                "oos_taken_trades": r["oos_taken_trades"],
+                "oos_total_events": r["oos_total_events"],
+                "oos_net_sharpe": round(r["oos_net_sharpe"], 3),
+            }
+            for r in trial_records
+        ],
+    }
