@@ -5,6 +5,8 @@ from src.strategies.primary_strategies import (
     TrendPullbackPrimary,
     DonchianBreakoutPrimary,
     VolatilityMeanReversionPrimary,
+    MacroCarryMomentumPrimary,
+    VixRegimeEquityPrimary,
     get_primary_strategy,
 )
 
@@ -13,5 +15,7 @@ __all__ = [
     "TrendPullbackPrimary",
     "DonchianBreakoutPrimary",
     "VolatilityMeanReversionPrimary",
+    "MacroCarryMomentumPrimary",
+    "VixRegimeEquityPrimary",
     "get_primary_strategy",
 ]

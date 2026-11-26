@@ -88,10 +88,56 @@ def build_meta_feature_matrix(
         tv_std = tv.rolling(20, min_periods=10).std().replace(0.0, np.nan)
         feats["tick_vol_z20"] = (tv - tv_mean) / tv_std
 
+    # 4b. Diferenciales Macro v3.1, Estructura VIX, Crédito, Ratio Oro/Plata y Microestructura de Ticks
+    v31_macro_and_micro_cols = (
+        "rate_diff_us2y_ecb",
+        "delta_rate_diff_5d",
+        "delta_rate_diff_20d",
+        "rate_diff_fed_ecb",
+        "yield_curve_10y_2y",
+        "us_real_yield_10y",
+        "delta_real_yield_5d",
+        "delta_real_yield_20d",
+        "breakeven_infl_10y",
+        "delta_breakeven_20d",
+        "vix3m_close",
+        "vix_term_ratio",
+        "vix_contango",
+        "credit_hy_ief_ratio",
+        "delta_credit_ratio_20d",
+        "gold_silver_ratio",
+        "delta_gsr_20d",
+        "tick_imbalance_norm",
+        "vpin_proxy",
+        "spread_zscore",
+        "tick_arrival_rate",
+    )
+    for col in v31_macro_and_micro_cols:
+        if col in df.columns:
+            feats[col] = df[col].astype(float)
+
+    # Flag de calendario determinista Turn-of-the-Month (últimos 2 días o primeros 3 días hábiles del mes)
+    if "time" in df.columns:
+        ts = pd.to_datetime(df["time"])
+    elif isinstance(df.index, pd.DatetimeIndex):
+        ts = pd.to_datetime(df.index)
+    else:
+        ts = None
+
+    if ts is not None:
+        ts_ser = pd.Series(ts, index=df.index)
+        days_left = ts_ser.dt.days_in_month - ts_ser.dt.day
+        feats["is_turn_of_month"] = np.where((ts_ser.dt.day <= 4) | (days_left <= 1), 1.0, 0.0)
+
     # 5. Contexto direccional del Modelo Primario (alineación señal/momentum)
     feats["primary_side"] = sides
     feats["side_aligned_mom_20d"] = sides * feats["mom_20d_vol"]
     feats["side_aligned_dist_sma200"] = sides * feats["dist_sma200_atr"]
+
+    if "delta_rate_diff_20d" in feats.columns:
+        feats["side_aligned_rate_diff_20d"] = sides * (-feats["delta_rate_diff_20d"])
+    if "vix_contango" in feats.columns:
+        feats["side_aligned_vix_contango"] = sides * feats["vix_contango"]
 
     if bars_since_cusum is not None:
         feats["bars_since_cusum"] = np.asarray(bars_since_cusum, dtype=np.float64)

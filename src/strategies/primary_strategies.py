@@ -173,10 +173,136 @@ class VolatilityMeanReversionPrimary(BasePrimaryStrategy):
         }
 
 
+class MacroCarryMomentumPrimary(BasePrimaryStrategy):
+    """
+    Hipótesis Económica (FX / Oro — v3.1):
+    Combina el impulso del diferencial macro causal con la tendencia del precio.
+    - mode='fx_rate_diff' (EURUSD): Long (+1) cuando el diferencial US2Y - ECB cae
+      (delta_rate_diff_20d < 0, favorece EUR) y Close > EMA(ema_window); Short (-1)
+      en sentido opuesto si bilateral=True.
+    - mode='real_yield' (Oro): Long (+1) cuando las tasas reales TIPS caen o no suben
+      (delta_real_yield_20d <= 0) y Close > SMA(sma_window).
+    """
+
+    name = "MacroCarryMomentumPrimary"
+
+    def __init__(
+        self,
+        mode: str = "fx_rate_diff",
+        ema_window: int = 50,
+        sma_window: int = 100,
+        bilateral: bool = True,
+    ):
+        super().__init__(bilateral=bilateral)
+        self.mode = mode
+        self.ema_window = int(ema_window)
+        self.sma_window = int(sma_window)
+
+    def generate_sides(self, df: pd.DataFrame) -> pd.Series:
+        if "close" not in df.columns:
+            raise ValueError("Falta columna 'close' para MacroCarryMomentumPrimary.")
+
+        close = df["close"].astype(float)
+        sides = np.zeros(len(df), dtype=np.int8)
+
+        if self.mode == "real_yield":
+            sma = close.rolling(self.sma_window, min_periods=min(30, self.sma_window)).mean()
+            if "delta_real_yield_20d" in df.columns:
+                d_ry = df["delta_real_yield_20d"].astype(float)
+                long_cond = (~sma.isna()) & (~d_ry.isna()) & (d_ry <= 0.0) & (close > sma)
+                short_cond = (~sma.isna()) & (~d_ry.isna()) & (d_ry > 0.0) & (close < sma)
+            else:
+                long_cond = (~sma.isna()) & (close > sma)
+                short_cond = (~sma.isna()) & (close < sma)
+        else:
+            ema = close.ewm(span=self.ema_window, adjust=False).mean()
+            if "delta_rate_diff_20d" in df.columns:
+                d_diff = df["delta_rate_diff_20d"].astype(float)
+                long_cond = (~d_diff.isna()) & (d_diff < 0.0) & (close > ema)
+                short_cond = (~d_diff.isna()) & (d_diff > 0.0) & (close < ema)
+            else:
+                long_cond = close > ema
+                short_cond = close < ema
+
+        sides = np.where(long_cond.values, 1, sides)
+        if self.bilateral:
+            sides = np.where(short_cond.values, -1, sides)
+
+        return pd.Series(sides.astype(np.int8), index=df.index, name="primary_side")
+
+    def get_params(self) -> Dict[str, Any]:
+        return {
+            "mode": self.mode,
+            "ema_window": self.ema_window,
+            "sma_window": self.sma_window,
+            "bilateral": self.bilateral,
+        }
+
+
+class VixRegimeEquityPrimary(BasePrimaryStrategy):
+    """
+    Hipótesis Económica (SP500 / Renta Variable — v3.1):
+    Opera Long (+1) solo bajo estructura de volatilidad en contango saludable
+    (VIX / VIX3M < vix_ratio_max), sin deterioro severo de crédito (HYG/IEF)
+    y tendencia alcista de mediano plazo (Close > SMA).
+    """
+
+    name = "VixRegimeEquityPrimary"
+
+    def __init__(
+        self,
+        vix_ratio_max: float = 0.98,
+        credit_delta_min: float = -0.03,
+        sma_window: int = 150,
+        bilateral: bool = False,
+    ):
+        super().__init__(bilateral=bilateral)
+        self.vix_ratio_max = float(vix_ratio_max)
+        self.credit_delta_min = float(credit_delta_min)
+        self.sma_window = int(sma_window)
+
+    def generate_sides(self, df: pd.DataFrame) -> pd.Series:
+        if "close" not in df.columns:
+            raise ValueError("Falta columna 'close' para VixRegimeEquityPrimary.")
+
+        close = df["close"].astype(float)
+        sma = close.rolling(self.sma_window, min_periods=min(40, self.sma_window)).mean()
+        cond_trend = (~sma.isna()) & (close > sma)
+
+        if "vix_term_ratio" in df.columns:
+            vr = df["vix_term_ratio"].astype(float)
+            cond_vol = vr.isna() | (vr < self.vix_ratio_max)
+        else:
+            cond_vol = pd.Series(True, index=df.index)
+
+        if "delta_credit_ratio_20d" in df.columns:
+            cr = df["delta_credit_ratio_20d"].astype(float)
+            cond_cred = cr.isna() | (cr > self.credit_delta_min)
+        else:
+            cond_cred = pd.Series(True, index=df.index)
+
+        sides = np.where((cond_trend & cond_vol & cond_cred).values, 1, 0)
+        if self.bilateral:
+            short_cond = (~sma.isna()) & (close < sma) & (~cond_vol | ~cond_cred)
+            sides = np.where(short_cond.values, -1, sides)
+
+        return pd.Series(sides.astype(np.int8), index=df.index, name="primary_side")
+
+    def get_params(self) -> Dict[str, Any]:
+        return {
+            "vix_ratio_max": self.vix_ratio_max,
+            "credit_delta_min": self.credit_delta_min,
+            "sma_window": self.sma_window,
+            "bilateral": self.bilateral,
+        }
+
+
 _STRATEGY_REGISTRY = {
     "TrendPullbackPrimary": TrendPullbackPrimary,
     "DonchianBreakoutPrimary": DonchianBreakoutPrimary,
     "VolatilityMeanReversionPrimary": VolatilityMeanReversionPrimary,
+    "MacroCarryMomentumPrimary": MacroCarryMomentumPrimary,
+    "VixRegimeEquityPrimary": VixRegimeEquityPrimary,
 }
 
 
